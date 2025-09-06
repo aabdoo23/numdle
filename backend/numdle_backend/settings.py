@@ -25,12 +25,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-0z2vidtqcl^r&#svc-9-1^=w5a*=3n_+m6xdpz*1164z=3)z85'
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-0z2vidtqcl^r&#svc-9-1^=w5a*=3n_+m6xdpz*1164z=3)z85')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Default to True for local dev; set DEBUG=False in Render
+DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = []
+# Build ALLOWED_HOSTS dynamically. In Render, RENDER_EXTERNAL_HOSTNAME is provided.
+default_allowed = ['localhost', '127.0.0.1']
+render_hostname = os.getenv('RENDER_EXTERNAL_HOSTNAME')
+if render_hostname:
+    default_allowed.append(render_hostname)
+env_allowed = [h.strip() for h in os.getenv('ALLOWED_HOSTS', '').split(',') if h.strip()]
+ALLOWED_HOSTS = default_allowed + env_allowed
 
 
 # Application definition
@@ -51,6 +58,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -80,22 +88,42 @@ WSGI_APPLICATION = 'numdle_backend.wsgi.application'
 ASGI_APPLICATION = 'numdle_backend.asgi.application'
 
 # Channels
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            "hosts": [('127.0.0.1', 6379)],
+# Channels / Redis (use REDIS_URL in production; fallback to localhost for dev)
+REDIS_URL = os.getenv('REDIS_URL')
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [REDIS_URL],
+            },
         },
-    },
-}
+    }
+else:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [('127.0.0.1', 6379)],
+            },
+        },
+    }
 
 # CORS settings for frontend
-CORS_ALLOWED_ORIGINS = [
+# Add local dev origins plus optional FRONTEND_ORIGIN env (e.g., https://numdle-sepia.vercel.app)
+_cors_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
+FRONTEND_ORIGIN = os.getenv('FRONTEND_ORIGIN')
+if FRONTEND_ORIGIN:
+    _cors_origins.append(FRONTEND_ORIGIN)
+vercel_origin = os.getenv('VERCEL_ORIGIN', 'https://numdle-sepia.vercel.app')
+if vercel_origin not in _cors_origins and vercel_origin:
+    _cors_origins.append(vercel_origin)
+CORS_ALLOWED_ORIGINS = _cors_origins
 
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_ALL_ORIGINS = False
@@ -119,6 +147,16 @@ CORS_ALLOWED_METHODS = [
     'PUT',
 ]
 
+# CSRF trusted origins (required when DEBUG=False)
+_csrf_origins = []
+if render_hostname:
+    _csrf_origins.append(f"https://{render_hostname}")
+if vercel_origin:
+    _csrf_origins.append(vercel_origin)
+extra_csrf = os.getenv('CSRF_TRUSTED_ORIGINS', '')
+_csrf_origins += [o.strip() for o in extra_csrf.split(',') if o.strip()]
+CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(_csrf_origins))  # dedupe, keep order
+
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
@@ -129,7 +167,7 @@ DATABASES = {
         'NAME': os.getenv('DB_NAME', 'postgres'),
         'USER': os.getenv('DB_USER', 'postgres'),
         'PASSWORD': os.getenv('DB_PASSWORD', ''),
-        'HOST': os.getenv('DB_HOST', 'localhost'),
+    'HOST': os.getenv('DB_HOST', 'localhost'),
         'PORT': os.getenv('DB_PORT', '5432'),
         'OPTIONS': {
             'sslmode': 'require',
@@ -173,6 +211,11 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+# Ensure request.is_secure() works behind Render's proxy
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

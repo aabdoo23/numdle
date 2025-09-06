@@ -17,7 +17,8 @@ export class GameWebSocket {
     return new Promise((resolve, reject) => {
       try {
         const token = localStorage.getItem('bc_access_token');
-        const wsUrl = `ws://localhost:8000/ws/game/${roomId}/` + (token ? `?token=${encodeURIComponent(token)}` : '');
+  const base = (import.meta as any).env?.VITE_WS_BASE_URL || 'ws://localhost:8000';
+  const wsUrl = `${base}/ws/game/${roomId}/` + (token ? `?token=${encodeURIComponent(token)}` : '');
         this.socket = new WebSocket(wsUrl);
 
         this.socket.onopen = () => {

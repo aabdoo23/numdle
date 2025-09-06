@@ -1,0 +1,67 @@
+services:
+  - type: web
+    name: numdle-backend
+    env: python
+    plan: free
+    region: oregon
+    buildCommand: |
+      cd backend
+      pip install -r requirements.txt
+      python manage.py collectstatic --noinput
+      python manage.py migrate --noinput
+    startCommand: |
+      cd backend
+      daphne -b 0.0.0.0 -p $PORT numdle_backend.asgi:application
+    healthCheckPath: /api/stats/
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.6
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "False"
+      - key: ALLOWED_HOSTS
+        fromService:
+          type: web
+          name: numdle-backend
+          property: host
+      - key: FRONTEND_ORIGIN
+        value: https://numdle-sepia.vercel.app
+      - key: VERCEL_ORIGIN
+        value: https://numdle-sepia.vercel.app
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: numdle-redis
+          property: connectionString
+      - key: DB_HOST
+        fromDatabase:
+          name: numdle-db
+          property: host
+      - key: DB_NAME
+        fromDatabase:
+          name: numdle-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: numdle-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: numdle-db
+          property: password
+      - key: DB_PORT
+        fromDatabase:
+          name: numdle-db
+          property: port
+  - type: redis
+    name: numdle-redis
+    ipAllowList: []
+    plan: free
+
+databases:
+  - name: numdle-db
+    plan: free
+    databaseName: numdle
+    user: numdle

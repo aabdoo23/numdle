@@ -29,10 +29,9 @@ export const LoginPage: React.FC = () => {
           <img
             src="/logo.png"
             alt="Site logo"
-            className="mx-auto w-16 h-16 object-contain mb-4"
+            className="mx-auto w-48 object-contain mb-4"
             loading="eager"
           />
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Bulls & Cows</h1>
           <p className="text-gray-600">Guess the secret 4-digit number!</p>
         </div>
 
