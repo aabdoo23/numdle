@@ -1,0 +1,20 @@
+/* Custom app styles */
+.app {
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* Override any default Vite styles */
+#root {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  display: block;
+  place-items: unset;
+}
