@@ -6,6 +6,8 @@ from rest_framework_simplejwt.views import (
 from . import views
 
 urlpatterns = [
+    # Public health check
+    path('health/', views.health, name='health'),
     # JWT auth endpoints
     path('auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),

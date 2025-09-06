@@ -12,6 +12,12 @@ import uuid
 
 
 @csrf_exempt
+def health(request):
+    """Simple public health check endpoint."""
+    return JsonResponse({"status": "ok"})
+
+
+@csrf_exempt
 def register(request):
     if request.method == 'POST':
         data = json.loads(request.body)

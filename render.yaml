@@ -12,7 +12,7 @@ services:
     startCommand: |
       cd backend
       daphne -b 0.0.0.0 -p $PORT numdle_backend.asgi:application
-    healthCheckPath: /api/stats/
+  healthCheckPath: /api/health/
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION
@@ -36,32 +36,17 @@ services:
           name: numdle-redis
           property: connectionString
       - key: DB_HOST
-        fromDatabase:
-          name: numdle-db
-          property: host
+        sync: false
       - key: DB_NAME
-        fromDatabase:
-          name: numdle-db
-          property: database
+        sync: false
       - key: DB_USER
-        fromDatabase:
-          name: numdle-db
-          property: user
+        sync: false
       - key: DB_PASSWORD
-        fromDatabase:
-          name: numdle-db
-          property: password
+        sync: false
       - key: DB_PORT
-        fromDatabase:
-          name: numdle-db
-          property: port
+        sync: false
   - type: redis
     name: numdle-redis
     ipAllowList: []
     plan: free
-
-databases:
-  - name: numdle-db
-    plan: free
-    databaseName: numdle
-    user: numdle
+    
