@@ -6,9 +6,12 @@ from django.views import View
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
+from rest_framework_simplejwt.tokens import RefreshToken
 from .models import GameRoom, Player, Guess
 import json
 import uuid
+import random
+import string
 
 
 @csrf_exempt
@@ -33,6 +36,53 @@ def register(request):
     return JsonResponse({'error': 'Invalid method'}, status=405)
 
 
+@csrf_exempt
+def guest_access(request):
+    """Create or reuse a temporary guest user and return JWT tokens.
+
+    Body: {"username": "desired_name"}
+    Response: {"user_id": int, "username": str, "access": str, "refresh": str}
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Invalid method'}, status=405)
+
+    try:
+        data = json.loads(request.body or '{}')
+    except Exception:
+        data = {}
+
+    desired = (data.get('username') or '').strip()
+    if not desired:
+        return JsonResponse({'error': 'Username is required'}, status=400)
+
+    # Normalize allowed chars
+    base = ''.join(ch for ch in desired if ch.isalnum() or ch in ('_', '-'))[:30] or 'guest'
+    username = base
+    if User.objects.filter(username=username).exists():
+        # try a few numeric suffixes
+        for _ in range(5):
+            suffix = '-' + ''.join(random.choices(string.digits, k=4))
+            candidate = (base[:30 - len(suffix)] + suffix)
+            if not User.objects.filter(username=candidate).exists():
+                username = candidate
+                break
+        else:
+            username = base + '-' + uuid.uuid4().hex[:6]
+
+    user, created = User.objects.get_or_create(username=username)
+    if created:
+        user.set_unusable_password()
+        user.save()
+
+    refresh = RefreshToken.for_user(user)
+    return JsonResponse({
+        'user_id': user.id,
+        'username': user.username,
+        'access': str(refresh.access_token),
+        'refresh': str(refresh),
+    })
+
+
 class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -43,10 +93,8 @@ class MeView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class GameRoomView(APIView):
     def get_permissions(self):
-        # Allow unauthenticated users to list rooms, require auth for creating
-        if getattr(self.request, 'method', 'GET') == 'GET':
-            return [AllowAny()]
-        return [IsAuthenticated()]
+        # Allow unauthenticated users to list and create rooms
+        return [AllowAny()]
 
     def get(self, request):
         """List all available game rooms"""
@@ -99,16 +147,25 @@ class GameRoomView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class JoinRoomView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request, room_id):
         """Join an existing game room"""
         
         try:
             room = GameRoom.objects.get(id=room_id)
+            # Determine acting user: authenticated user or guest username provided in payload
+            data = request.data if hasattr(request, 'data') else json.loads(request.body or '{}')
+            acting_user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+            if not acting_user:
+                guest_name = (data.get('username') or '').strip()
+                if guest_name:
+                    acting_user, _ = User.objects.get_or_create(username=guest_name)
             # If the user is already a player in the room, allow rejoin regardless of capacity or status
             try:
-                player = Player.objects.get(user=request.user, room=room)
+                if not acting_user:
+                    raise Player.DoesNotExist
+                player = Player.objects.get(user=acting_user, room=room)
                 # Ensure player has a team assigned (might be older records)
                 if not player.team:
                     a_count = room.players.filter(team='A').count()
@@ -125,7 +182,6 @@ class JoinRoomView(APIView):
 
             # Enforce private room password if applicable
             if room.is_private:
-                data = request.data if hasattr(request, 'data') else json.loads(request.body or '{}')
                 provided = data.get('password', '')
                 if not provided or provided != (room.password or ''):
                     return JsonResponse({'error': 'Invalid or missing room password'}, status=403)
@@ -137,7 +193,10 @@ class JoinRoomView(APIView):
             if room.status not in [GameRoom.WAITING, GameRoom.SETTING_NUMBERS]:
                 return JsonResponse({'error': 'Game already in progress'}, status=400)
 
-            player, created = Player.objects.get_or_create(user=request.user, room=room)
+            if not acting_user:
+                return JsonResponse({'error': 'Username required to join as guest'}, status=400)
+
+            player, created = Player.objects.get_or_create(user=acting_user, room=room)
             if created:
                 # Assign team to balance sizes
                 a_count = room.players.filter(team='A').count()

@@ -10,6 +10,7 @@ export interface Player {
   is_winner: boolean;
   joined_at?: string;
   team?: 'A' | 'B';
+  secret_number?: string; // present for self always, and for everyone at game end
 }
 
 export interface GameRoom {
@@ -48,6 +49,7 @@ export interface RoomState {
   guesses: Guess[];
   creator_username?: string | null;
   is_private?: boolean;
+  winner_username?: string | null;
 }
 
 export interface WebSocketMessage {

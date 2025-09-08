@@ -233,17 +233,24 @@ class GameConsumer(AsyncWebsocketConsumer):
             return False, "Invalid guess"
 
     @database_sync_to_async
-    def get_room_state(self):
+    def get_room_state(self, current_user_id=None):
         try:
             room = GameRoom.objects.get(id=self.room_id)
             players = []
             for player in room.players.all():
+                reveal_secret = False
+                # Reveal to the owner always; reveal to everyone when finished
+                if current_user_id and player.user_id == current_user_id:
+                    reveal_secret = True
+                if room.status == GameRoom.FINISHED:
+                    reveal_secret = True
                 players.append({
                     'id': player.id,
                     'username': player.user.username,
                     'has_secret_number': bool(player.secret_number),
                     'is_winner': player.is_winner,
-                    'team': player.team
+                    'team': player.team,
+                    **({'secret_number': player.secret_number} if reveal_secret else {})
                 })
             
             guesses = []
@@ -258,6 +265,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                     'timestamp': guess.timestamp.isoformat()
                 })
             
+            winner = room.players.filter(is_winner=True).order_by('joined_at').first()
             return {
                 'room_id': str(room.id),
                 'name': room.name,
@@ -267,13 +275,15 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'current_turn_team': room.current_turn_team,
                 'turn_start_time': room.turn_start_time.isoformat() if room.turn_start_time else None,
                 'turn_time_limit': room.turn_time_limit,
-                'guesses': guesses
+                'guesses': guesses,
+                'winner_username': winner.user.username if winner else None
             }
         except GameRoom.DoesNotExist:
             return None
 
     async def send_room_state(self):
-        room_state = await self.get_room_state()
+        current_user_id = getattr(self.user, 'id', None)
+        room_state = await self.get_room_state(current_user_id)
         if room_state:
             await self.channel_layer.group_send(
                 self.room_group_name,

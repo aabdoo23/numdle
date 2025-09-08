@@ -27,6 +27,16 @@ export const gameApi = {
     return { id: response.data.user_id, username } as User;
   },
 
+  guest: async (username: string): Promise<{ user: User; access: string; refresh: string }> => {
+    const res = await api.post('/auth/guest/', { username });
+    const access = res.data.access as string;
+    const refresh = res.data.refresh as string;
+    localStorage.setItem('bc_access_token', access);
+    localStorage.setItem('bc_refresh_token', refresh);
+    const user = { id: res.data.user_id, username: res.data.username } as User;
+    return { user, access, refresh };
+  },
+
   login: async (username: string, password: string): Promise<{ user: User; access: string; refresh: string }> => {
     const res = await api.post('/auth/token/', { username, password });
     const access = res.data.access as string;
@@ -66,8 +76,11 @@ export const gameApi = {
     return response.data;
   },
 
-  joinRoom: async (roomId: string, password?: string): Promise<{ message: string; room_status: string }> => {
-    const response = await api.post(`/rooms/${roomId}/join/`, password ? { password } : {});
+  joinRoom: async (roomId: string, password?: string, username?: string): Promise<{ message: string; room_status: string }> => {
+    const payload: any = {};
+    if (password) payload.password = password;
+    if (username) payload.username = username;
+    const response = await api.post(`/rooms/${roomId}/join/`, payload);
     return response.data;
   },
 

@@ -8,6 +8,7 @@ interface GameContextType {
   // User state
   user: User | null;
   isAuthenticated: boolean;
+  signInGuest: (username: string) => Promise<boolean>;
   
   // Room state
   currentRoom: RoomState | null;
@@ -76,6 +77,22 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     }
   }, []);
 
+  const signInGuest = useCallback(async (username: string): Promise<boolean> => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const { user: userData } = await gameApi.guest(username);
+      setUser(userData);
+      localStorage.setItem('bc_user', JSON.stringify(userData));
+      return true;
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Guest sign-in failed');
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   // On mount: try to restore session via /auth/me/ (cookie-based) or fallback to cached user
   useEffect(() => {
     let cancelled = false;
@@ -136,7 +153,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setIsLoading(true);
     setError(null);
     try {
-      await gameApi.joinRoom(roomId);
+  // For guests, include username so backend can create membership if tokenless
+  await gameApi.joinRoom(roomId, undefined, user.username);
       
       // Connect WebSocket
       await gameWebSocket.connect(roomId);
@@ -223,6 +241,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const value: GameContextType = {
     user,
     isAuthenticated: !!user,
+  signInGuest,
     currentRoom,
     isConnected,
     login,

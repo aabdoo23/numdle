@@ -8,6 +8,8 @@ from . import views
 urlpatterns = [
     # Public health check
     path('health/', views.health, name='health'),
+    # Guest access (no password)
+    path('auth/guest/', views.guest_access, name='guest_access'),
     # JWT auth endpoints
     path('auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),

@@ -1,11 +1,90 @@
 @import "tailwindcss";
 
+/* Tailwind v4 tokens: define our brand palette and custom shadows */
+@theme {
+  /* Brand aliases (optional) */
+  --color-brand-primary: #901c15;
+  --color-brand-secondary: #4C5454;
+  --color-brand-neutral: #F2F4F3;
+  --color-brand-success: #57A773;
+  --color-brand-warning: #F29E4C;
+
+  /* Primary */
+  --color-primary-50:  #fef2f2;
+  --color-primary-100: #fee2e2;
+  --color-primary-200: #fecaca;
+  --color-primary-300: #fca5a5;
+  --color-primary-400: #f87171;
+  --color-primary-500: #ef4444;
+  --color-primary-600: #dc2626;
+  --color-primary-700: #b91c1c;
+  --color-primary-800: #991b1b;
+  --color-primary-900: #901c15;
+  --color-primary-950: #7f1d1d;
+
+  /* Secondary */
+  --color-secondary-50:  #f8fafc;
+  --color-secondary-100: #f1f5f9;
+  --color-secondary-200: #e2e8f0;
+  --color-secondary-300: #cbd5e1;
+  --color-secondary-400: #94a3b8;
+  --color-secondary-500: #64748b;
+  --color-secondary-600: #4C5454;
+  --color-secondary-700: #374151;
+  --color-secondary-800: #1f2937;
+  --color-secondary-900: #111827;
+
+  /* Neutral */
+  --color-neutral-50:  #F2F4F3;
+  --color-neutral-100: #f7fafc;
+  --color-neutral-200: #edf2f7;
+  --color-neutral-300: #e2e8f0;
+  --color-neutral-400: #cbd5e1;
+  --color-neutral-500: #a0aec0;
+  --color-neutral-600: #718096;
+  --color-neutral-700: #4a5568;
+  --color-neutral-800: #2d3748;
+  --color-neutral-900: #1a202c;
+
+  /* Success */
+  --color-success-50:  #f0fdf4;
+  --color-success-100: #dcfce7;
+  --color-success-200: #bbf7d0;
+  --color-success-300: #86efac;
+  --color-success-400: #4ade80;
+  --color-success-500: #57A773;
+  --color-success-600: #16a34a;
+  --color-success-700: #15803d;
+  --color-success-800: #166534;
+  --color-success-900: #14532d;
+
+  /* Warning */
+  --color-warning-50:  #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-200: #fde68a;
+  --color-warning-300: #fcd34d;
+  --color-warning-400: #fbbf24;
+  --color-warning-500: #F29E4C;
+  --color-warning-600: #d97706;
+  --color-warning-700: #b45309;
+  --color-warning-800: #92400e;
+  --color-warning-900: #78350f;
+
+  /* Game-specific colors (optional helpers) */
+  --color-game-strikes: #dc2626;
+  --color-game-balls:   #F29E4C;
+  --color-game-correct: #57A773;
+  --color-game-team-a:  #3b82f6;
+  --color-game-team-b:  #8b5cf6;
+
+  /* Custom shadows used via shadow-brand and shadow-brand-lg */
+  --shadow-brand:  0 4px 6px -1px rgb(144 28 21 / 0.10), 0 2px 4px -1px rgb(144 28 21 / 0.06);
+  --shadow-brand-lg: 0 10px 15px -3px rgb(144 28 21 / 0.10), 0 4px 6px -2px rgb(144 28 21 / 0.05);
+}
+
 /* Basic resets to let Tailwind control layout */
 html, body, #root { height: 100%; }
 body { margin: 0; }
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
 
 body {
   margin: 0;
