@@ -84,6 +84,13 @@ export const gameApi = {
     return response.data;
   },
 
+  rematchRoom: async (roomId: string, username?: string): Promise<{ room_id: string; room_name: string; room_status: string }> => {
+    const payload: any = {};
+    if (username) payload.username = username;
+    const response = await api.post(`/rooms/${roomId}/rematch/`, payload);
+    return response.data;
+  },
+
   getRoomDetail: async (roomId: string): Promise<RoomState> => {
     const response = await api.get(`/rooms/${roomId}/`);
     return response.data;

@@ -23,6 +23,7 @@ interface GameContextType {
   leaveRoom: () => void;
   setSecretNumber: (number: string) => void;
   makeGuess: (guess: string, targetPlayerId?: number) => void;
+  rematch: () => Promise<boolean>;
   
   // UI state
   isLoading: boolean;
@@ -238,6 +239,28 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     }
   }, [isConnected]);
 
+  const rematch = useCallback(async (): Promise<boolean> => {
+    if (!user || !currentRoom) return false;
+    
+    setIsLoading(true);
+    setError(null);
+    try {
+      const rematchData = await gameApi.rematchRoom(currentRoom.room_id, user.username);
+      
+      // Leave current room first
+      leaveRoom();
+      
+      // Join the new rematch room
+      const joined = await joinRoom(rematchData.room_id);
+      return joined;
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to create rematch');
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user, currentRoom, leaveRoom, joinRoom]);
+
   const value: GameContextType = {
     user,
     isAuthenticated: !!user,
@@ -252,6 +275,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     leaveRoom,
     setSecretNumber,
     makeGuess,
+    rematch,
     isLoading,
     error,
     clearError,

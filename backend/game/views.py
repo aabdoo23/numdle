@@ -314,3 +314,73 @@ class StatsView(APIView):
             'total_guesses': total_guesses,
             'average_guesses_to_win': round(avg_guesses, 2),
         })
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class RematchView(APIView):
+    permission_classes = [AllowAny]
+    
+    def post(self, request, room_id):
+        """Create a rematch room with the same players and settings"""
+        try:
+            # Get the original room
+            original_room = GameRoom.objects.get(id=room_id)
+            
+            # Only allow rematch if the game is finished
+            if original_room.status != GameRoom.FINISHED:
+                return JsonResponse({'error': 'Can only rematch finished games'}, status=400)
+            
+            # Determine acting user: authenticated user or guest username provided in payload
+            data = request.data if hasattr(request, 'data') else json.loads(request.body or '{}')
+            acting_user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+            if not acting_user:
+                guest_name = (data.get('username') or '').strip()
+                if guest_name:
+                    acting_user, _ = User.objects.get_or_create(username=guest_name)
+            
+            if not acting_user:
+                return JsonResponse({'error': 'Authentication required'}, status=401)
+            
+            # Check if the user was a player in the original room
+            try:
+                Player.objects.get(user=acting_user, room=original_room)
+            except Player.DoesNotExist:
+                return JsonResponse({'error': 'Only players from the original game can create a rematch'}, status=403)
+            
+            # Create new room with same settings but new name
+            room_name = f"Rematch: {original_room.name}"
+            new_room = GameRoom.objects.create(
+                name=room_name,
+                max_players=original_room.max_players,
+                turn_time_limit=original_room.turn_time_limit,
+                creator=acting_user,
+                is_private=original_room.is_private,
+                password=original_room.password
+            )
+            
+            # Add all players from the original room to the new room
+            original_players = original_room.players.all().order_by('joined_at')
+            for original_player in original_players:
+                # Determine team assignment - keep the same team structure
+                Player.objects.create(
+                    user=original_player.user,
+                    room=new_room,
+                    team=original_player.team
+                )
+            
+            # If room is now full, move to setting numbers phase
+            if new_room.is_full:
+                new_room.status = GameRoom.SETTING_NUMBERS
+                new_room.save()
+            
+            return JsonResponse({
+                'message': 'Rematch room created successfully',
+                'room_id': str(new_room.id),
+                'room_name': new_room.name,
+                'room_status': new_room.status
+            })
+            
+        except GameRoom.DoesNotExist:
+            return JsonResponse({'error': 'Original room not found'}, status=404)
+        except Exception as e:
+            return JsonResponse({'error': 'Failed to create rematch room'}, status=500)

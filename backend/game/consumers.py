@@ -233,17 +233,24 @@ class GameConsumer(AsyncWebsocketConsumer):
             return False, "Invalid guess"
 
     @database_sync_to_async
-    def get_room_state(self, current_user_id=None):
+    def get_room_state(self, current_user_id=None, personalized=False):
+        """Build a room state snapshot.
+
+        If personalized=True and current_user_id is provided, include only THAT user's
+        secret number (unless game finished). If personalized=False, never include
+        any secret numbers unless the game has finished (then reveal all).
+        This prevents leaking another player's secret via broadcasts triggered by them.
+        """
         try:
             room = GameRoom.objects.get(id=self.room_id)
             players = []
+            finished = room.status == GameRoom.FINISHED
             for player in room.players.all():
                 reveal_secret = False
-                # Reveal to the owner always; reveal to everyone when finished
-                if current_user_id and player.user_id == current_user_id:
-                    reveal_secret = True
-                if room.status == GameRoom.FINISHED:
-                    reveal_secret = True
+                if finished:
+                    reveal_secret = True  # end of game: reveal all
+                elif personalized and current_user_id and player.user_id == current_user_id:
+                    reveal_secret = True  # only reveal requesting player's own secret mid‑game
                 players.append({
                     'id': player.id,
                     'username': player.user.username,
@@ -252,7 +259,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                     'team': player.team,
                     **({'secret_number': player.secret_number} if reveal_secret else {})
                 })
-            
+
             guesses = []
             for guess in Guess.objects.filter(room=room).order_by('timestamp'):
                 guesses.append({
@@ -264,7 +271,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                     'is_correct': guess.is_correct,
                     'timestamp': guess.timestamp.isoformat()
                 })
-            
+
             winner = room.players.filter(is_winner=True).order_by('joined_at').first()
             return {
                 'room_id': str(room.id),
@@ -282,16 +289,32 @@ class GameConsumer(AsyncWebsocketConsumer):
             return None
 
     async def send_room_state(self):
+        """Broadcast a generic state + send personalized state to this socket.
+
+        Generic: no mid‑game secrets.
+        Personalized: includes only this user's secret (or all if finished).
+        """
         current_user_id = getattr(self.user, 'id', None)
-        room_state = await self.get_room_state(current_user_id)
-        if room_state:
+
+        # Generic state for everyone
+        generic_state = await self.get_room_state(None, personalized=False)
+        if generic_state:
             await self.channel_layer.group_send(
                 self.room_group_name,
                 {
                     'type': 'room_state_update',
-                    'room_state': room_state
+                    'room_state': generic_state
                 }
             )
+
+        # Personalized state just for this connection (if authenticated user exists)
+        if current_user_id:
+            personal_state = await self.get_room_state(current_user_id, personalized=True)
+            if personal_state:
+                await self.send(text_data=json.dumps({
+                    'type': 'room_state_update',
+                    'data': personal_state
+                }))
 
     async def room_state_update(self, event):
         await self.send(text_data=json.dumps({

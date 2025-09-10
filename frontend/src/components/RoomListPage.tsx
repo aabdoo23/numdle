@@ -139,20 +139,6 @@ export const RoomListPage: React.FC = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-secondary-700 font-medium mb-2">
-                    Max Players
-                  </label>
-                  <select
-                    value={maxPlayers}
-                    onChange={(e) => setMaxPlayers(Number(e.target.value))}
-                    className="w-full px-4 py-3 border border-neutral-300 rounded-lg focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-colors"
-                  >
-                    <option value={2}>2 Players</option>
-                    <option value={3}>3 Players</option>
-                    <option value={4}>4 Players</option>
-                  </select>
-                </div>
-                                <div>
-                  <label className="block text-secondary-700 font-medium mb-2">
                     Turn Time Limit
                   </label>
                   <select
@@ -206,7 +192,8 @@ export const RoomListPage: React.FC = () => {
               </div>
             </form>
           </div>
-        )}
+        )
+        }
 
         {/* Rooms list */}
         <div className="space-y-4">
@@ -230,12 +217,11 @@ export const RoomListPage: React.FC = () => {
                   <div className="flex-1">
                     <div className="flex items-center space-x-3 mb-2">
                       <h3 className="text-xl font-bold text-secondary-900">{room.name}</h3>
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                        room.status === 'waiting' ? 'bg-success-100 text-success-800' :
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${room.status === 'waiting' ? 'bg-success-100 text-success-800' :
                         room.status === 'setting_numbers' ? 'bg-warning-100 text-warning-800' :
-                        room.status === 'playing' ? 'bg-primary-100 text-primary-800' :
-                        'bg-neutral-100 text-neutral-800'
-                      }`}>
+                          room.status === 'playing' ? 'bg-primary-100 text-primary-800' :
+                            'bg-neutral-100 text-neutral-800'
+                        }`}>
                         {room.status.replace('_', ' ').toUpperCase()}
                       </span>
                       {room.is_private ? (
@@ -290,42 +276,44 @@ export const RoomListPage: React.FC = () => {
             ))
           )}
         </div>
-      </div>
+      </div >
 
       {/* Stats modal */}
-      {showStats && stats && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-brand-lg p-6 w-full max-w-md border border-neutral-200">
-            <h3 className="text-xl font-bold text-secondary-900 mb-4">My Stats</h3>
-            <div className="space-y-3 text-secondary-800">
-              <div className="flex justify-between py-2 border-b border-neutral-100">
-                <span>Games played</span>
-                <span className="font-bold text-primary-900">{stats.games_played}</span>
+      {
+        showStats && stats && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-brand-lg p-6 w-full max-w-md border border-neutral-200">
+              <h3 className="text-xl font-bold text-secondary-900 mb-4">My Stats</h3>
+              <div className="space-y-3 text-secondary-800">
+                <div className="flex justify-between py-2 border-b border-neutral-100">
+                  <span>Games played</span>
+                  <span className="font-bold text-primary-900">{stats.games_played}</span>
+                </div>
+                <div className="flex justify-between py-2 border-b border-neutral-100">
+                  <span>Games won</span>
+                  <span className="font-bold text-success-700">{stats.games_won}</span>
+                </div>
+                <div className="flex justify-between py-2 border-b border-neutral-100">
+                  <span>Total guesses</span>
+                  <span className="font-bold text-secondary-700">{stats.total_guesses}</span>
+                </div>
+                <div className="flex justify-between py-2">
+                  <span>Avg guesses to win</span>
+                  <span className="font-bold text-primary-700">{stats.average_guesses_to_win}</span>
+                </div>
               </div>
-              <div className="flex justify-between py-2 border-b border-neutral-100">
-                <span>Games won</span>
-                <span className="font-bold text-success-700">{stats.games_won}</span>
+              <div className="mt-6 text-right">
+                <button
+                  onClick={() => setShowStats(false)}
+                  className="px-6 py-3 rounded-lg bg-neutral-200 hover:bg-neutral-300 text-secondary-700 font-medium transition-colors"
+                >
+                  Close
+                </button>
               </div>
-              <div className="flex justify-between py-2 border-b border-neutral-100">
-                <span>Total guesses</span>
-                <span className="font-bold text-secondary-700">{stats.total_guesses}</span>
-              </div>
-              <div className="flex justify-between py-2">
-                <span>Avg guesses to win</span>
-                <span className="font-bold text-primary-700">{stats.average_guesses_to_win}</span>
-              </div>
-            </div>
-            <div className="mt-6 text-right">
-              <button
-                onClick={() => setShowStats(false)}
-                className="px-6 py-3 rounded-lg bg-neutral-200 hover:bg-neutral-300 text-secondary-700 font-medium transition-colors"
-              >
-                Close
-              </button>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )
+      }
+    </div >
   );
 };

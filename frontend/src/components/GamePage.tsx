@@ -11,13 +11,16 @@ export const GamePage: React.FC = () => {
   const [showWinModal, setShowWinModal] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [notes, setNotes] = useState('');
-  const [availableDigits, setAvailableDigits] = useState<boolean[]>(Array(10).fill(true));
+  // Removed separate availableDigits tracker; overall digit summary now handles elimination.
   // 0: orange (possible), 1: green (only works here), 2: red (can't work here)
+  // Slot digit state matrix: values per digit per slot
+  // -1 = unknown (not reviewed yet), 0 = possible, 1 = confirmed (only here), 2 = cannot
   const [slotDigits, setSlotDigits] = useState<number[][]>([
-    Array(10).fill(0), Array(10).fill(0), Array(10).fill(0), Array(10).fill(0)
+    Array(10).fill(-1), Array(10).fill(-1), Array(10).fill(-1), Array(10).fill(-1)
   ]);
   const [draftGuessDigits, setDraftGuessDigits] = useState<string[]>(['', '', '', '']);
   const [isRulesExpanded, setIsRulesExpanded] = useState(false);
+  const [isRematchLoading, setIsRematchLoading] = useState(false);
 
   const {
     currentRoom,
@@ -25,6 +28,7 @@ export const GamePage: React.FC = () => {
     leaveRoom,
     setSecretNumber: submitSecretNumber,
     makeGuess,
+    rematch,
     error
   } = useGame();
 
@@ -60,6 +64,16 @@ export const GamePage: React.FC = () => {
   }
 
   const currentPlayer = currentRoom.players.find(p => p.username === user?.username);
+  // Cache for user's own secret number to avoid flicker when generic broadcast omits it
+  const [cachedOwnSecret, setCachedOwnSecret] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (currentPlayer?.secret_number) {
+      // Update cache whenever personalized payload supplies it
+      setCachedOwnSecret(currentPlayer.secret_number);
+    }
+    // If we previously had a cache but personalized state not yet arrived, keep cache
+  }, [currentPlayer?.secret_number, currentPlayer?.id]);
   const myTeam = currentPlayer?.team;
   const isMyTurn = currentRoom.current_turn_player === user?.username;
   const canSetSecret = currentRoom.status === 'setting_numbers' && currentPlayer && !currentPlayer.has_secret_number;
@@ -88,6 +102,20 @@ export const GamePage: React.FC = () => {
       // Target is chosen by backend (first opponent)
       makeGuess(guess);
       setGuessDigits(['', '', '', '']);
+    }
+  };
+
+  const handleRematch = async () => {
+    setIsRematchLoading(true);
+    try {
+      const success = await rematch();
+      if (success) {
+        setShowWinModal(false);
+      }
+    } catch (error) {
+      console.error('Rematch failed:', error);
+    } finally {
+      setIsRematchLoading(false);
     }
   };
 
@@ -138,19 +166,60 @@ export const GamePage: React.FC = () => {
     return /^\d+$/.test(num) && new Set(num).size === num.length;
   };
 
-  const toggleDigit = (digit: number) => {
-    const next = [...availableDigits];
-    next[digit] = !next[digit];
-    setAvailableDigits(next);
-  };
+  // (global availability toggler removed – summary grid now interactive)
 
   const toggleSlotDigit = (slotIndex: number, digit: number) => {
-    const newSlotDigits = [...slotDigits];
-    const currentState = newSlotDigits[slotIndex][digit];
+    setSlotDigits(prev => {
+      const copy = prev.map(row => [...row]);
+      const current = copy[slotIndex][digit];
+      // Cycle: -1 (unknown) -> 0 (possible) -> 1 (confirmed) -> 2 (cannot) -> -1
+      let next: number;
+      switch (current) {
+        case -1: next = 0; break;
+        case 0: next = 1; break;
+        case 1: next = 2; break;
+        default: next = -1; break;
+      }
+      // If setting confirmed (1), clear that digit's confirmed state in other slots automatically
+      if (next === 1) {
+        for (let s = 0; s < copy.length; s++) {
+          if (s !== slotIndex && copy[s][digit] === 1) copy[s][digit] = 0; // revert others to possible
+        }
+      }
+      copy[slotIndex][digit] = next;
+      return copy;
+    });
+  };
 
-    // Cycle through states: 0 (orange/possible) -> 1 (green/only here) -> 2 (red/can't work) -> 0
-    newSlotDigits[slotIndex][digit] = (currentState + 1) % 3;
-    setSlotDigits(newSlotDigits);
+  // Bulk helpers
+  const clearSlot = (slotIndex: number) => {
+    setSlotDigits(prev => prev.map((row, i) => i === slotIndex ? Array(10).fill(-1) : row));
+  };
+  const markAllPossible = (slotIndex: number) => {
+    setSlotDigits(prev => prev.map((row, i) => i === slotIndex ? row.map(v => v === -1 ? 0 : v) : row));
+  };
+  const markAllCannot = (slotIndex: number) => {
+    setSlotDigits(prev => prev.map((row, i) => i === slotIndex ? Array(10).fill(2) : row));
+  };
+  const clearAllSlots = () => setSlotDigits([
+    Array(10).fill(-1), Array(10).fill(-1), Array(10).fill(-1), Array(10).fill(-1)
+  ]);
+
+  // Aggregated view per digit across all slots
+  const aggregateDigitState = (digit: number): number => {
+    // Return 1 if confirmed in any slot, 0 if possible somewhere (and not confirmed),
+    // 2 if cannot everywhere, -1 if all unknown
+    let anyUnknown = false, anyPossible = false, anyConfirmed = false;
+    for (const slot of slotDigits) {
+      const st = slot[digit];
+      if (st === 1) anyConfirmed = true;
+      else if (st === 0) anyPossible = true;
+      else if (st === -1) anyUnknown = true;
+    }
+    if (anyConfirmed) return 1;
+    if (anyPossible) return 0;
+    if (anyUnknown) return -1;
+    return 2; // all cannot
   };
 
   // (was: toggleImpossibleSlotDigit) — removed as feature is not used in UI
@@ -244,7 +313,9 @@ export const GamePage: React.FC = () => {
                     {player.username === user?.username ? (
                       <div className="flex items-center gap-2">
                         <span className="px-2 py-1 rounded bg-primary-100 font-mono text-sm">
-                          {showSecret || currentRoom.status === 'finished' ? (player.secret_number || '----') : '••••'}
+                          {showSecret || currentRoom.status === 'finished'
+                            ? ((player.secret_number || cachedOwnSecret) || '----')
+                            : '••••'}
                         </span>
                         <button
                           onClick={() => setShowSecret(!showSecret)}
@@ -389,14 +460,14 @@ export const GamePage: React.FC = () => {
               <div className="space-y-4 overflow-y-auto">
                 {currentRoom.guesses.filter(g => currentRoom.players.find(p => p.username === g.player)?.team === myTeam).slice().reverse().map((g, i) => (
                   <div key={i} className="relative p-4 bg-white rounded-xl border-2 border-success-200 shadow-md hover:shadow-lg transition-all duration-300">
-                    {g.is_correct && (
-                      <div className="absolute -top-2 -right-2 bg-warning-400 text-warning-900 p-1 rounded-full shadow-lg">
-                        <Trophy className="w-4 h-4" />
-                      </div>
-                    )}
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-2 text-sm">
+                          {g.is_correct && (
+                            <div className="bg-warning-100 text-warning-600 p-1.5 rounded-full shadow-sm animate-pulse">
+                              <Trophy className="w-4 h-4" />
+                            </div>
+                          )}
                           <span className="font-bold text-success-700">{g.player}</span>
                           <span className="text-emerald-500">→</span>
                           <span className="font-semibold text-gray-700">{g.target_player}</span>
@@ -503,14 +574,14 @@ export const GamePage: React.FC = () => {
               <div className="space-y-3 max-h-80 overflow-y-auto">
                 {currentRoom.guesses.filter(g => currentRoom.players.find(p => p.username === g.player)?.team !== myTeam).slice().reverse().map((g, i) => (
                   <div key={i} className="relative p-3 bg-white rounded-lg border border-neutral-300 shadow-sm hover:shadow-md transition-all duration-300">
-                    {g.is_correct && (
-                      <div className="absolute -top-1 -right-1 bg-warning-400 text-warning-900 p-1 rounded-full shadow-lg">
-                        <Trophy className="w-3 h-3" />
-                      </div>
-                    )}
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-2 text-sm">
+                          {g.is_correct && (
+                            <div className="bg-warning-100 text-warning-600 p-1 rounded-full shadow-sm animate-pulse">
+                              <Trophy className="w-3 h-3" />
+                            </div>
+                          )}
                           <span className="font-bold text-secondary-700">{g.player}</span>
                         </div>
                         <div className="text-xs text-secondary-500">
@@ -554,70 +625,113 @@ export const GamePage: React.FC = () => {
                 Strategy & Notes
               </h2>
 
-              {/* Enhanced Digit Tracker */}
-              <div className="mb-4">
-                <h3 className="text-sm font-bold text-secondary-700 mb-2">Overall Digit Availability</h3>
-                <div className="grid grid-cols-5 gap-2">
-                  {Array.from({ length: 10 }).map((_, d) => (
-                    <button
-                      key={d}
-                      onClick={() => toggleDigit(d)}
-                      className={`h-12 rounded-xl text-lg font-bold transition-all ${availableDigits[d]
-                        ? 'bg-success-100 text-success-800 border-2 border-success-300 hover:bg-success-200'
-                        : 'bg-warning-100 text-warning-800 border-2 border-warning-300 hover:bg-warning-200'
-                        }`}
-                    >
-                      {d}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex justify-between text-xs text-secondary-600 mt-2">
-                  <span className="flex items-center"><span className="w-3 h-3 bg-success-100 rounded mr-1"></span>Available</span>
-                  <span className="flex items-center"><span className="w-3 h-3 bg-warning-100 rounded mr-1"></span>Eliminated</span>
-                </div>
-              </div>
-
               {/* Position Analysis - Columns by Slot */}
               <div className="mb-6">
-                <h3 className="text-sm font-bold text-secondary-700 mb-3">Position Analysis</h3>
+                <h3 className="text-sm font-bold text-secondary-700 mb-3 flex items-center justify-between">
+                  <span>Position Analysis</span>
+                  <button onClick={clearAllSlots} className="text-xs px-2 py-1 rounded bg-neutral-100 hover:bg-neutral-200 text-secondary-700 font-semibold">Reset All</button>
+                </h3>
+
+                {/* Aggregated summary */}
+                <div className="mt-4 mb-4 p-4 bg-white border border-secondary-200 rounded-xl shadow-sm">
+                  <h5 className="text-xs font-bold text-secondary-700 mb-3 flex items-center justify-between">
+                    <span>Overall Digit Summary</span>
+                    <span className="text-[10px] text-secondary-500">Click a digit to toggle global elimination</span>
+                  </h5>
+                  <div className="grid grid-cols-10 gap-2">
+                    {Array.from({ length: 10 }).map((_, d) => {
+                      const agg = aggregateDigitState(d);
+                      let cls = '';
+                      let label = '';
+                      if (agg === -1) { cls = 'bg-neutral-100 text-secondary-600 hover:bg-neutral-200 border border-neutral-500'; label = 'Unknown'; }
+                      else if (agg === 0) { cls = 'bg-warning-400 text-white hover:bg-warning-500 border border-warning-500'; label = 'Possible somewhere'; }
+                      else if (agg === 1) { cls = 'bg-success-500 text-white hover:bg-success-600 ring-2 ring-success-300 border border-success-500'; label = 'Confirmed in a slot'; }
+                      else { cls = 'bg-primary-400 text-white opacity-85 hover:opacity-100 border border-primary-500'; label = 'Eliminated everywhere'; }
+
+                      const onClick = () => {
+                        setSlotDigits(prev => {
+                          const copy = prev.map(row => [...row]);
+                          if (agg === 2) {
+                            // Restore: set fully eliminated digit back to unknown where not confirmed
+                            for (let s = 0; s < copy.length; s++) {
+                              if (copy[s][d] === 2) copy[s][d] = -1;
+                            }
+                          } else {
+                            // Eliminate globally (except confirmed slots)
+                            for (let s = 0; s < copy.length; s++) {
+                              if (copy[s][d] !== 1) copy[s][d] = 2;
+                            }
+                          }
+                          return copy;
+                        });
+                      };
+
+                      return (
+                        <button
+                          key={d}
+                          onClick={onClick}
+                          title={`${d}: ${label}. Click to ${agg === 2 ? 'restore' : 'eliminate globally'}`}
+                          className={`h-9 rounded text-xs font-bold transition-all flex items-center justify-center ${cls}`}
+                        >
+                          {d}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {[0, 1, 2, 3].map(slotIndex => (
-                    <div key={slotIndex} className="bg-white rounded-lg p-3 border border-secondary-200">
-                      <h4 className="text-xs font-bold text-secondary-700 text-center mb-2">Slot {slotIndex + 1}</h4>
-                      <div className="flex flex-col space-y-1">
-                        {Array.from({ length: 10 }).map((_, digit) => {
-                          const digitState = slotDigits[slotIndex][digit];
-                          let buttonClass = '';
-
-                          if (digitState === 0) {
-                            // Orange - possible
-                            buttonClass = 'bg-warning-400 text-white hover:bg-warning-500';
-                          } else if (digitState === 1) {
-                            // Green - only works here
-                            buttonClass = 'bg-success-500 text-white hover:bg-success-600';
-                          } else {
-                            // Red - can't work here
-                            buttonClass = 'bg-primary-400 text-white hover:bg-primary-500';
-                          }
-
-                          return (
-                            <button
-                              key={digit}
-                              onClick={() => toggleSlotDigit(slotIndex, digit)}
-                              className={`h-7 w-full rounded text-xs font-bold transition-all ${buttonClass}`}
-                            >
-                              {digit}
-                            </button>
-                          );
-                        })}
-                      </div>
+                  <div key={slotIndex} className="bg-white rounded-xl p-3 border border-secondary-200 flex flex-col shadow-sm">
+                    <div className="text-center mb-2 text-[14px] font-semibold text-secondary-700">
+                    <span>Slot {slotIndex + 1}</span>
                     </div>
+                    <div className="flex gap-1 justify-center mb-3">
+                    <button title="Mark unknown digits as possible" onClick={() => markAllPossible(slotIndex)} className="px-1.5 py-0.5 rounded bg-warning-100 text-warning-700 hover:bg-warning-200 text-[11px] border border-warning-300">?→P</button>
+                    <button title="Mark all digits cannot" onClick={() => markAllCannot(slotIndex)} className="px-1.5 py-0.5 rounded bg-primary-100 text-primary-700 hover:bg-primary-200 text-[11px] border border-primary-300">All X</button>
+                    <button title="Clear slot" onClick={() => clearSlot(slotIndex)} className="px-1.5 py-0.5 rounded bg-neutral-100 text-secondary-600 hover:bg-neutral-200 text-[11px] border border-neutral-500">Clr</button>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                    {Array.from({ length: 10 }).map((_, digit) => {
+                      const st = slotDigits[slotIndex][digit];
+                      let cls = '';
+                      if (st === -1) cls = 'bg-neutral-100 text-secondary-600 hover:bg-neutral-200 border border-neutral-500';
+                      else if (st === 0) cls = 'bg-warning-400 text-white hover:bg-warning-500 border border-warning-500';
+                      else if (st === 1) cls = 'bg-success-500 text-white hover:bg-success-600 ring-2 ring-success-300 border border-success-600';
+                      else cls = 'bg-primary-400 text-white hover:bg-primary-500 opacity-85 border border-primary-500';
+                      return (
+                      <div key={digit} className="flex items-center gap-1">
+                        <button
+                        onClick={() => toggleSlotDigit(slotIndex, digit)}
+                        title={`Digit ${digit}: ${st === -1 ? 'Unknown' : st === 0 ? 'Possible' : st === 1 ? 'Confirmed here' : 'Eliminated here'}`}
+                        className={`flex-1 h-8 rounded text-sm font-bold transition-all ${cls}`}
+                        >
+                        {digit}
+                        </button>
+                        <button
+                        onClick={() => setSlotDigits(prev => {
+                          const copy = prev.map(row => [...row]);
+                          copy[slotIndex][digit] = -1;
+                          return copy;
+                        })}
+                        title={`Reset digit ${digit} to unknown`}
+                        className="w-5 h-5 rounded-full bg-neutral-200 hover:bg-neutral-300 text-neutral-600 hover:text-neutral-800 text-xs flex items-center justify-center transition-colors"
+                        >
+                        <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                      );
+                    })}
+                    </div>
+                  </div>
                   ))}
                 </div>
-                <div className="mt-2 text-xs text-secondary-600 flex items-center gap-4">
-                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-warning-400"></span>Possible</span>
-                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-success-500"></span>Only Here</span>
-                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-primary-400"></span>Can't Work</span>
+
+                <div className="mt-3 text-[11px] text-secondary-600 flex flex-wrap gap-4">
+                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-neutral-200 border border-neutral-300" />Unknown</span>
+                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-warning-400" />Possible</span>
+                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-success-500" />Confirmed</span>
+                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-primary-400" />Cannot</span>
+                  <span className="opacity-70">Click cycles states • Confirmed auto-unsets same digit in other slots.</span>
                 </div>
               </div>
 
@@ -699,21 +813,41 @@ export const GamePage: React.FC = () => {
       {showWinModal && currentRoom.status === 'finished' && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-brand-lg w-full max-w-lg p-6 border border-neutral-200">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-2xl font-bold text-secondary-900 flex items-center gap-2">
-                <Trophy className="w-6 h-6 text-warning-500" /> Game Over
-              </h3>
-              <button
+            <div className="text-center mb-6">
+              <div className="relative">
+              {/* Celebration background effects */}
+              <div className="absolute inset-0 bg-gradient-to-r from-warning-100 via-success-100 to-primary-100 rounded-2xl opacity-50 animate-pulse"></div>
+              
+              {/* Main winner announcement */}
+              <div className="relative bg-gradient-to-br from-warning-50 to-success-50 rounded-2xl p-8 border-4 border-warning-300 shadow-xl">
+                <div className="flex items-center justify-center mb-4">
+                <div className="bg-warning-400 p-4 rounded-full animate-bounce shadow-lg">
+                  <Trophy className="w-12 h-12 text-white" />
+                </div>
+                </div>
+                
+                <h2 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-warning-600 to-success-600 mb-2">
+                🎉 Game Over! 🎉
+                </h2>
+                
+                <div className="text-2xl font-bold text-secondary-800 mb-4">
+                <span className="text-success-700 font-extrabold text-3xl">
+                  {currentRoom.winner_username || winner?.username || '—'}
+                </span>
+                <div className="text-lg text-secondary-600 mt-1">
+                  wins the game!
+                </div>
+                </div>
+
+                {/* Close button moved to top right corner */}
+                <button
                 onClick={() => setShowWinModal(false)}
-                className="text-secondary-500 hover:text-secondary-800"
+                className="absolute top-4 right-4 text-secondary-400 hover:text-secondary-600 transition-colors"
                 aria-label="Close"
-              >
+                >
                 <X className="w-6 h-6" />
-              </button>
-            </div>
-            <div className="mb-4">
-              <div className="text-secondary-700">
-                Winner: <span className="font-extrabold text-success-700">{currentRoom.winner_username || winner?.username || '—'}</span>
+                </button>
+              </div>
               </div>
             </div>
             <div className="border rounded-xl overflow-hidden">
@@ -732,7 +866,24 @@ export const GamePage: React.FC = () => {
                 ))}
               </div>
             </div>
-            <div className="mt-6 text-right">
+            <div className="mt-6 flex justify-between">
+              <button
+                onClick={handleRematch}
+                disabled={isRematchLoading}
+                className="px-6 py-3 rounded-lg bg-success-600 text-white hover:bg-success-700 disabled:bg-success-400 disabled:cursor-not-allowed shadow-brand transition-colors flex items-center gap-2"
+              >
+                {isRematchLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Trophy className="w-4 h-4" />
+                    Rematch
+                  </>
+                )}
+              </button>
               <button
                 onClick={() => setShowWinModal(false)}
                 className="px-6 py-3 rounded-lg bg-primary-600 text-white hover:bg-primary-700 shadow-brand transition-colors"
