@@ -13,20 +13,23 @@ class GameConsumer(AsyncWebsocketConsumer):
         self.room_id = self.scope['url_route']['kwargs']['room_id']
         self.room_group_name = f'game_{self.room_id}'
         self.user = self.scope['user']
-        
-        # Join room group
-        await self.channel_layer.group_add(
-            self.room_group_name,
-            self.channel_name
-        )
-        
-        await self.accept()
-        
+        # Reject immediately if not authenticated (prevents AnonymousUser FK lookups)
+        if not getattr(self.user, 'is_authenticated', False):
+            await self.close()
+            return
+
         # Ensure the user is already a player (joining happens via REST). If not, close.
         player, room = await self.add_player_to_room()
         if player is None:
             await self.close()
             return
+
+        # Only join group & accept after validation succeeds
+        await self.channel_layer.group_add(
+            self.room_group_name,
+            self.channel_name
+        )
+        await self.accept()
         # Backfill team if missing
         if not player.team:
             await self.ensure_player_team(player.id)
@@ -77,6 +80,9 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def add_player_to_room(self):
+        # Guard against AnonymousUser making a DB lookup with invalid FK value
+        if not getattr(self, 'user', None) or not getattr(self.user, 'is_authenticated', False):
+            return None, None
         try:
             room = GameRoom.objects.get(id=self.room_id)
             try:
