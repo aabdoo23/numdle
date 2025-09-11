@@ -5,20 +5,12 @@ import { gameApi } from '../services/api';
 import { gameWebSocket } from '../services/websocket';
 
 interface GameContextType {
-  // User state
   user: User | null;
-  isAuthenticated: boolean;
-  signInGuest: (username: string) => Promise<boolean>;
-  
-  // Room state
+  isAuthenticated: boolean; // alias for !!user
+  setGuestUsername: (username: string) => Promise<boolean>;
   currentRoom: RoomState | null;
   teamStrategy: TeamStrategy | null;
   isConnected: boolean;
-  
-  // Actions
-  login: (username: string, password: string) => Promise<boolean>;
-  register: (username: string, password: string) => Promise<boolean>;
-  logout: () => Promise<void>;
   joinRoom: (roomId: string) => Promise<boolean>;
   createRoom: (name: string, maxPlayers?: number, turnTimeLimit?: number, options?: { isPrivate?: boolean; password?: string }) => Promise<string | null>;
   leaveRoom: () => void;
@@ -27,8 +19,6 @@ interface GameContextType {
   rematch: () => Promise<boolean>;
   updateTeamStrategy: (partial: Partial<Omit<TeamStrategy, 'team' | 'version'>> & { optimistic?: boolean }) => void;
   changeTeam: (team: 'A' | 'B') => void;
-  
-  // UI state
   isLoading: boolean;
   error: string | null;
   clearError: () => void;
@@ -52,73 +42,33 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   const clearError = useCallback(() => setError(null), []);
 
-  const login = useCallback(async (username: string, password: string): Promise<boolean> => {
+  // In guest-only mode we just locally persist a pseudo-user; no server auth or tokens.
+  const setGuestUsername = useCallback(async (username: string): Promise<boolean> => {
+    const clean = (username || '').trim();
+    if (!clean) return false;
     setIsLoading(true);
     setError(null);
     try {
-      const { user: userData } = await gameApi.login(username, password);
+      // Create deterministic local id (hash) for stability across sessions on same device
+      const id = Math.abs(Array.from(clean).reduce((a, c) => ((a << 5) - a) + c.charCodeAt(0), 0)) % 1000000000;
+      const userData: User = { id, username: clean };
       setUser(userData);
       localStorage.setItem('bc_user', JSON.stringify(userData));
       return true;
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Login failed');
+    } catch (e) {
+      setError('Failed to set username');
       return false;
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  const register = useCallback(async (username: string, password: string): Promise<boolean> => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const userData = await gameApi.register(username, password);
-      setUser(userData);
-      localStorage.setItem('bc_user', JSON.stringify(userData));
-      return true;
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Registration failed');
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  const signInGuest = useCallback(async (username: string): Promise<boolean> => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const { user: userData } = await gameApi.guest(username);
-      setUser(userData);
-      localStorage.setItem('bc_user', JSON.stringify(userData));
-      return true;
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Guest sign-in failed');
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  // On mount: try to restore session via /auth/me/ (cookie-based) or fallback to cached user
+  // On mount: restore guest username from localStorage
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setIsLoading(true);
-      try {
-        const me = await gameApi.me();
-        if (!cancelled) setUser(me);
-      } catch {
-        // fallback to localStorage for smoother UX when backend not reachable
-        const raw = localStorage.getItem('bc_user');
-        if (raw && !cancelled) {
-          try { setUser(JSON.parse(raw)); } catch {}
-        }
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
+    const raw = localStorage.getItem('bc_user');
+    if (raw) {
+      try { setUser(JSON.parse(raw)); } catch {}
+    }
   }, []);
 
   // Auto-rejoin room on refresh if we have a cached room id
@@ -255,13 +205,10 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   const createRoom = useCallback(async (name: string, maxPlayers = 2, turnTimeLimit = 60, options?: { isPrivate?: boolean; password?: string }): Promise<string | null> => {
     if (!user) return null;
-    
     setIsLoading(true);
     setError(null);
     try {
       const roomData = await gameApi.createRoom(name, maxPlayers, turnTimeLimit, options);
-      
-      // Automatically join the created room
       const joined = await joinRoom(roomData.room_id);
       return joined ? roomData.room_id : null;
     } catch (err: any) {
@@ -286,13 +233,6 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   localStorage.removeItem('bc_current_room');
   }, []);
 
-  const logout = useCallback(async () => {
-    await gameApi.logout();
-    setUser(null);
-    localStorage.removeItem('bc_user');
-  localStorage.removeItem('bc_current_room');
-    leaveRoom();
-  }, [leaveRoom]);
 
   const makeGuess = useCallback((guess: string, targetPlayerId?: number) => {
     if (isConnected) {
@@ -306,16 +246,11 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   const rematch = useCallback(async (): Promise<boolean> => {
     if (!user || !currentRoom) return false;
-    
     setIsLoading(true);
     setError(null);
     try {
       const rematchData = await gameApi.rematchRoom(currentRoom.room_id, user.username);
-      
-      // Leave current room first
       leaveRoom();
-      
-      // Join the new rematch room
       const joined = await joinRoom(rematchData.room_id);
       return joined;
     } catch (err: any) {
@@ -366,25 +301,22 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const value: GameContextType = {
     user,
     isAuthenticated: !!user,
-  signInGuest,
+    setGuestUsername,
     currentRoom,
-  teamStrategy,
+    teamStrategy,
     isConnected,
-    login,
-    register,
-    logout,
     joinRoom,
     createRoom,
     leaveRoom,
     setSecretNumber,
     makeGuess,
     rematch,
-  updateTeamStrategy,
-  changeTeam: (team: 'A' | 'B') => { if (isConnected) gameWebSocket.changeTeam(team); },
+    updateTeamStrategy,
+    changeTeam: (team: 'A' | 'B') => { if (isConnected) gameWebSocket.changeTeam(team); },
     isLoading,
     error,
     clearError,
-  timeoutGraceEndsAt,
+    timeoutGraceEndsAt,
   };
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

@@ -936,8 +936,7 @@ export const GamePage: React.FC<GamePageProps> = ({ onHowToPlay }) => {
                     {currentRoom.winner_team ? (
                       <>
                         <span className="text-success-700 font-extrabold text-3xl">Team {currentRoom.winner_team}</span>
-                        <div className="text-lg text-secondary-600 mt-1">wins the game!</div>
-                        <div className="mt-3 text-sm text-secondary-700 font-medium">
+                        <div className="mt-3 text-2xl text-secondary-700 font-semibold">
                           {currentRoom.players.filter(p => p.team === currentRoom.winner_team).map(p => p.username).join(', ')}
                         </div>
                       </>

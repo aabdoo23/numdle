@@ -5,6 +5,7 @@ import { RoomListPage } from './components/RoomListPage';
 import { GamePage } from './components/GamePage';
 import { HowToPlayPage } from './components/HowToPlayPage';
 import './App.css';
+import { AdminDashboard } from './components/AdminDashboard';
 
 const AppContent: React.FC = () => {
   const { isAuthenticated, currentRoom } = useGame();
@@ -13,6 +14,11 @@ const AppContent: React.FC = () => {
 
   if (showHowToPlay) {
     return <HowToPlayPage onBack={() => setShowHowToPlay(false)} />;
+  }
+
+  // /admin route bypasses game flow
+  if (window.location.pathname === '/admin') {
+    return <AdminDashboard />;
   }
 
   // Show login page if not authenticated OR if user wants to see the main page

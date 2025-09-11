@@ -45,6 +45,79 @@ services:
         sync: false
       - key: DB_PORT
         sync: false
+  - type: worker
+    name: numdle-celery-worker
+    env: python
+    plan: free
+    region: oregon
+    buildCommand: |
+      cd backend
+      pip install -r requirements.txt
+    startCommand: |
+      cd backend
+      celery -A numdle_backend.celery worker --loglevel=info --concurrency=1
+    autoDeploy: true
+    envVars:
+      # IMPORTANT: Set this to the SAME value as the web service's DJANGO_SECRET_KEY (copy after first deploy)
+      - key: DJANGO_SECRET_KEY
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.12.6
+      - key: DEBUG
+        value: "False"
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: numdle-redis
+          property: connectionString
+      - key: DB_HOST
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_PORT
+        sync: false
+      # ALLOWED_HOSTS not required (no HTTP), but Django may read it; safe to omit.
+      # If you later need periodic tasks, add a beat service like below (uncomment & adjust):
+      # - key: ENABLE_BEAT (placeholder)
+  # Example (commented) Celery beat service if you add periodic tasks:
+  # - type: worker
+  #   name: numdle-celery-beat
+  #   env: python
+  #   plan: free
+  #   region: oregon
+  #   buildCommand: |
+  #     cd backend
+  #     pip install -r requirements.txt
+  #   startCommand: |
+  #     cd backend
+  #     celery -A numdle_backend.celery beat --loglevel=info
+  #   autoDeploy: true
+  #   envVars:
+  #     - key: DJANGO_SECRET_KEY
+  #       sync: false  # set same secret
+  #     - key: PYTHON_VERSION
+  #       value: 3.12.6
+  #     - key: DEBUG
+  #       value: "False"
+  #     - key: REDIS_URL
+  #       fromService:
+  #         type: redis
+  #         name: numdle-redis
+  #         property: connectionString
+  #     - key: DB_HOST
+  #       sync: false
+  #     - key: DB_NAME
+  #       sync: false
+  #     - key: DB_USER
+  #       sync: false
+  #     - key: DB_PASSWORD
+  #       sync: false
+  #     - key: DB_PORT
+  #       sync: false
   - type: redis
     name: numdle-redis
     ipAllowList: []

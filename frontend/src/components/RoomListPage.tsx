@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Users, Clock, Play, LogOut, Lock, Unlock, Trash2, BarChart2, Search, RefreshCw } from 'lucide-react';
+import { Plus, Users, Clock, Play, Lock, Unlock, Trash2, Search, RefreshCw } from 'lucide-react';
 import { useGame } from '../contexts/GameContext';
 import { gameApi } from '../services/api';
 import type { GameRoom } from '../types/game';
@@ -19,9 +19,7 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({ onHowToPlay }) => {
   const [turnTimeLimit, setTurnTimeLimit] = useState(60);
   const [isPrivate, setIsPrivate] = useState(false);
   const [password, setPassword] = useState('');
-  const { user, logout, joinRoom, createRoom, isLoading, error } = useGame();
-  const [stats, setStats] = useState<null | { games_played: number; games_won: number; total_guesses: number; average_guesses_to_win: number }>(null);
-  const [showStats, setShowStats] = useState(false);
+  const { user, joinRoom, createRoom, isLoading, error } = useGame();
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
@@ -96,15 +94,7 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({ onHowToPlay }) => {
     }
   };
 
-  const handleShowStats = async () => {
-    try {
-      const s = await gameApi.stats();
-      setStats(s);
-      setShowStats(true);
-    } catch (e) {
-      console.error('Failed to load stats', e);
-    }
-  };
+  // Stats removed in guest-only mode (endpoint requires auth)
 
   return (
     <div className="min-h-screen bg-neutral-50">
@@ -128,20 +118,7 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({ onHowToPlay }) => {
               <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
               <span>{isRefreshing ? 'Refreshing...' : 'Refresh'}</span>
             </button>
-            <button
-              onClick={handleShowStats}
-              className="bg-success-500 hover:bg-success-600 text-white px-6 py-3 rounded-lg flex items-center space-x-2 transition-colors shadow-brand"
-            >
-              <BarChart2 className="w-4 h-4" />
-              <span>My Stats</span>
-            </button>
-            <button
-              onClick={logout}
-              className="bg-secondary-600 hover:bg-secondary-700 text-white px-6 py-3 rounded-lg flex items-center space-x-2 transition-colors shadow-brand"
-            >
-              <LogOut className="w-4 h-4" />
-              <span>Logout</span>
-            </button>
+            {/* Stats & logout removed for guest-only mode */}
           </div>
         </div>
 
@@ -360,42 +337,7 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({ onHowToPlay }) => {
         </div>
       </div >
 
-      {/* Stats modal */}
-      {
-        showStats && stats && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-brand-lg p-6 w-full max-w-md border border-neutral-200">
-              <h3 className="text-xl font-bold text-secondary-900 mb-4">My Stats</h3>
-              <div className="space-y-3 text-secondary-800">
-                <div className="flex justify-between py-2 border-b border-neutral-100">
-                  <span>Games played</span>
-                  <span className="font-bold text-primary-900">{stats.games_played}</span>
-                </div>
-                <div className="flex justify-between py-2 border-b border-neutral-100">
-                  <span>Games won</span>
-                  <span className="font-bold text-success-700">{stats.games_won}</span>
-                </div>
-                <div className="flex justify-between py-2 border-b border-neutral-100">
-                  <span>Total guesses</span>
-                  <span className="font-bold text-secondary-700">{stats.total_guesses}</span>
-                </div>
-                <div className="flex justify-between py-2">
-                  <span>Avg guesses to win</span>
-                  <span className="font-bold text-primary-700">{stats.average_guesses_to_win}</span>
-                </div>
-              </div>
-              <div className="mt-6 text-right">
-                <button
-                  onClick={() => setShowStats(false)}
-                  className="px-6 py-3 rounded-lg bg-neutral-200 hover:bg-neutral-300 text-secondary-700 font-medium transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        )
-      }
+  {/* Stats modal removed */}
     </div >
   );
 };
