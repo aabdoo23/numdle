@@ -18,7 +18,7 @@ urlpatterns = [
     path('auth/me/', views.MeView.as_view(), name='me'),
     path('stats/', views.StatsView.as_view(), name='stats'),
     path('rooms/', views.GameRoomView.as_view(), name='game_rooms'),
-    path('rooms/<uuid:room_id>/', views.room_detail, name='room_detail'),
+    path('rooms/<uuid:room_id>/', views.RoomDetailView.as_view(), name='room_detail'),
     path('rooms/<uuid:room_id>/join/', views.JoinRoomView.as_view(), name='join_room'),
     path('rooms/<uuid:room_id>/rematch/', views.RematchView.as_view(), name='rematch'),
 ]

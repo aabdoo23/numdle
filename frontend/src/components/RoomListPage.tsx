@@ -1,12 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Users, Clock, Play, LogOut, Lock, Unlock, Trash2, BarChart2 } from 'lucide-react';
+import { Plus, Users, Clock, Play, LogOut, Lock, Unlock, Trash2, BarChart2, Search, RefreshCw } from 'lucide-react';
 import { useGame } from '../contexts/GameContext';
 import { gameApi } from '../services/api';
 import type { GameRoom } from '../types/game';
 import { TopBar } from './TopBar';
 
-export const RoomListPage: React.FC = () => {
+interface RoomListPageProps {
+  onHowToPlay?: () => void;
+}
+
+export const RoomListPage: React.FC<RoomListPageProps> = ({ onHowToPlay }) => {
   const [rooms, setRooms] = useState<GameRoom[]>([]);
+  const [filteredRooms, setFilteredRooms] = useState<GameRoom[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
   const [maxPlayers, setMaxPlayers] = useState(2);
@@ -16,12 +22,23 @@ export const RoomListPage: React.FC = () => {
   const { user, logout, joinRoom, createRoom, isLoading, error } = useGame();
   const [stats, setStats] = useState<null | { games_played: number; games_won: number; total_guesses: number; average_guesses_to_win: number }>(null);
   const [showStats, setShowStats] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     loadRooms();
-    const interval = setInterval(loadRooms, 10000); // Refresh every 10 seconds
-    return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    // Filter rooms based on search term
+    const filtered = rooms.filter(room => {
+      const searchLower = searchTerm.toLowerCase();
+      return (
+        room.name.toLowerCase().includes(searchLower) ||
+        (room.creator_username && room.creator_username.toLowerCase().includes(searchLower))
+      );
+    });
+    setFilteredRooms(filtered);
+  }, [rooms, searchTerm]);
 
   const loadRooms = async () => {
     try {
@@ -29,6 +46,15 @@ export const RoomListPage: React.FC = () => {
       setRooms(roomList);
     } catch (err) {
       console.error('Failed to load rooms:', err);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await loadRooms();
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -82,7 +108,7 @@ export const RoomListPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-neutral-50">
-      <TopBar page="rooms" />
+      <TopBar page="rooms" onHowToPlay={onHowToPlay} />
       <div className="max-w-4xl mx-auto p-4">
         {/* Action buttons */}
         <div className="bg-white rounded-2xl shadow-brand p-6 mb-6 border border-neutral-200">
@@ -93,6 +119,14 @@ export const RoomListPage: React.FC = () => {
             >
               <Plus className="w-4 h-4" />
               <span>Create Room</span>
+            </button>
+            <button
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-400 text-white px-6 py-3 rounded-lg flex items-center space-x-2 transition-colors shadow-brand"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span>{isRefreshing ? 'Refreshing...' : 'Refresh'}</span>
             </button>
             <button
               onClick={handleShowStats}
@@ -109,6 +143,25 @@ export const RoomListPage: React.FC = () => {
               <span>Logout</span>
             </button>
           </div>
+        </div>
+
+        {/* Search bar */}
+        <div className="bg-white rounded-2xl shadow-brand p-6 mb-6 border border-neutral-200">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral-400 w-5 h-5" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search rooms by name or creator..."
+              className="w-full pl-10 pr-4 py-3 border border-neutral-300 rounded-lg focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-colors"
+            />
+          </div>
+          {searchTerm && (
+            <p className="text-sm text-secondary-600 mt-2">
+              Showing {filteredRooms.length} of {rooms.length} rooms
+            </p>
+          )}
         </div>
 
         {/* Error message */}
@@ -137,6 +190,21 @@ export const RoomListPage: React.FC = () => {
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-secondary-700 font-medium mb-2">
+                    Max Players
+                  </label>
+                  <select
+                    value={maxPlayers}
+                    onChange={(e) => setMaxPlayers(Number(e.target.value))}
+                    className="w-full px-4 py-3 border border-neutral-300 rounded-lg focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-colors"
+                  >
+                    <option value={2}>2 players</option>
+                    <option value={4}>4 players</option>
+                    <option value={6}>6 players</option>
+                    <option value={8}>8 players</option>
+                  </select>
+                </div>
                 <div>
                   <label className="block text-secondary-700 font-medium mb-2">
                     Turn Time Limit
@@ -197,21 +265,35 @@ export const RoomListPage: React.FC = () => {
 
         {/* Rooms list */}
         <div className="space-y-4">
-          {rooms.length === 0 ? (
-            <div className="bg-white rounded-2xl shadow-brand p-8 text-center border border-neutral-200">
-              <Users className="w-12 h-12 text-neutral-400 mx-auto mb-4" />
-              <h3 className="text-xl font-bold text-secondary-900 mb-2">No rooms available</h3>
-              <p className="text-secondary-600 mb-4">Be the first to create a game room!</p>
-              <button
-                onClick={() => setShowCreateForm(true)}
-                className="bg-primary-900 hover:bg-primary-800 text-white px-6 py-3 rounded-lg inline-flex items-center space-x-2 shadow-brand transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Create Room</span>
-              </button>
-            </div>
+          {filteredRooms.length === 0 ? (
+            searchTerm ? (
+              <div className="bg-white rounded-2xl shadow-brand p-8 text-center border border-neutral-200">
+                <Search className="w-12 h-12 text-neutral-400 mx-auto mb-4" />
+                <h3 className="text-xl font-bold text-secondary-900 mb-2">No rooms found</h3>
+                <p className="text-secondary-600 mb-4">No rooms match your search "{searchTerm}". Try a different search term.</p>
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="bg-primary-900 hover:bg-primary-800 text-white px-6 py-3 rounded-lg transition-colors shadow-brand"
+                >
+                  Clear Search
+                </button>
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl shadow-brand p-8 text-center border border-neutral-200">
+                <Users className="w-12 h-12 text-neutral-400 mx-auto mb-4" />
+                <h3 className="text-xl font-bold text-secondary-900 mb-2">No rooms available</h3>
+                <p className="text-secondary-600 mb-4">Be the first to create a game room!</p>
+                <button
+                  onClick={() => setShowCreateForm(true)}
+                  className="bg-primary-900 hover:bg-primary-800 text-white px-6 py-3 rounded-lg inline-flex items-center space-x-2 shadow-brand transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Create Room</span>
+                </button>
+              </div>
+            )
           ) : (
-            rooms.map((room) => (
+            filteredRooms.map((room) => (
               <div key={room.id} className="bg-white rounded-2xl shadow-brand p-6 border border-neutral-200">
                 <div className="flex items-center justify-between">
                   <div className="flex-1">

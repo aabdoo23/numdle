@@ -1,22 +1,39 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { GameProvider, useGame } from './contexts/GameContext';
 import { LoginPage } from './components/LoginPage';
 import { RoomListPage } from './components/RoomListPage';
 import { GamePage } from './components/GamePage';
+import { HowToPlayPage } from './components/HowToPlayPage';
 import './App.css';
 
 const AppContent: React.FC = () => {
   const { isAuthenticated, currentRoom } = useGame();
+  const [showHowToPlay, setShowHowToPlay] = useState(false);
+  const [forceShowLogin, setForceShowLogin] = useState(false);
 
-  if (!isAuthenticated) {
-    return <LoginPage />;
+  if (showHowToPlay) {
+    return <HowToPlayPage onBack={() => setShowHowToPlay(false)} />;
+  }
+
+  // Show login page if not authenticated OR if user wants to see the main page
+  if (!isAuthenticated || forceShowLogin) {
+    return (
+      <LoginPage
+        onHowToPlay={() => setShowHowToPlay(true)}
+        onPlayClick={() => setForceShowLogin(false)}
+      />
+    );
   }
 
   if (currentRoom) {
-    return <GamePage />;
+    return <GamePage onHowToPlay={() => setShowHowToPlay(true)} />;
   }
 
-  return <RoomListPage />;
+  return (
+    <RoomListPage
+      onHowToPlay={() => setShowHowToPlay(true)}
+    />
+  );
 };
 
 function App() {

@@ -1,15 +1,16 @@
 import React from 'react';
-import { ArrowLeft, Users, Clock } from 'lucide-react';
+import { ArrowLeft, Users, Clock, HelpCircle } from 'lucide-react';
 import { useGame } from '../contexts/GameContext';
 
 interface TopBarProps {
-  page: 'login' | 'rooms' | 'game';
+  page: 'login' | 'rooms' | 'game' | 'how-to-play';
   onBack?: () => void;
+  onHowToPlay?: () => void;
   title?: string;
   subtitle?: string;
 }
 
-export const TopBar: React.FC<TopBarProps> = ({ page, onBack, title, subtitle }) => {
+export const TopBar: React.FC<TopBarProps> = ({ page, onBack, onHowToPlay, title, subtitle }) => {
   const { user, currentRoom } = useGame();
 
   const getPageContent = () => {
@@ -31,6 +32,12 @@ export const TopBar: React.FC<TopBarProps> = ({ page, onBack, title, subtitle })
           title: title || `Room ${currentRoom?.name}`,
           subtitle: subtitle || currentRoom?.status?.replace('_', ' ').toUpperCase(),
           showBack: true
+        };
+      case 'how-to-play':
+        return {
+          title: 'How to Play Numdle',
+          subtitle: 'Learn the rules and strategies',
+          showBack: !!onBack
         };
       default:
         return {
@@ -76,6 +83,18 @@ export const TopBar: React.FC<TopBarProps> = ({ page, onBack, title, subtitle })
 
           {/* Right side - User info and game status */}
           <div className="flex items-center space-x-4">
+            {/* How to Play button */}
+            {page !== 'how-to-play' && onHowToPlay && (
+              <button
+                onClick={onHowToPlay}
+                className="text-secondary-600 hover:text-primary-900 flex items-center space-x-2 transition-colors p-2 rounded-lg hover:bg-neutral-100"
+                title="How to Play"
+              >
+                <HelpCircle className="w-5 h-5" />
+                <span className="hidden sm:inline">How to Play</span>
+              </button>
+            )}
+
             {/* Game-specific status */}
             {page === 'game' && currentRoom && (
               <div className="hidden md:flex items-center space-x-3">

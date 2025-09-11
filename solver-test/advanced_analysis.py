@@ -1,5 +1,5 @@
 """
-Advanced analysis and visualization for Bulls and Cows strategies.
+Advanced analysis and visualization for Numdle strategies.
 """
 
 import matplotlib.pyplot as plt
@@ -150,7 +150,7 @@ def strategy_recommendations():
 
 
 if __name__ == "__main__":
-    print("=== Bulls and Cows Advanced Analysis ===")
+    print("=== Numdle Advanced Analysis ===")
     
     # Theoretical analysis
     theory = theoretical_analysis()

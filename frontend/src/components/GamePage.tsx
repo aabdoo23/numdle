@@ -3,7 +3,11 @@ import { Users, Clock, Send, Target, Trophy, Eye, EyeOff, Shield, Swords, Brain,
 import { useGame } from '../contexts/GameContext';
 import { TopBar } from './TopBar';
 
-export const GamePage: React.FC = () => {
+interface GamePageProps {
+  onHowToPlay?: () => void;
+}
+
+export const GamePage: React.FC<GamePageProps> = ({ onHowToPlay }) => {
   const [secretNumber, setSecretNumber] = useState('');
   const [guessDigits, setGuessDigits] = useState(['', '', '', '']);
   // Target is implicit: opponent team; no manual selection needed
@@ -11,14 +15,12 @@ export const GamePage: React.FC = () => {
   const [showWinModal, setShowWinModal] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [notes, setNotes] = useState('');
-  // Removed separate availableDigits tracker; overall digit summary now handles elimination.
-  // 0: orange (possible), 1: green (only works here), 2: red (can't work here)
-  // Slot digit state matrix: values per digit per slot
-  // -1 = unknown (not reviewed yet), 0 = possible, 1 = confirmed (only here), 2 = cannot
+
   const [slotDigits, setSlotDigits] = useState<number[][]>([
     Array(10).fill(-1), Array(10).fill(-1), Array(10).fill(-1), Array(10).fill(-1)
   ]);
   const [draftGuessDigits, setDraftGuessDigits] = useState<string[]>(['', '', '', '']);
+  const [activeStrategyTab, setActiveStrategyTab] = useState<'team' | 'personal'>('team');
   const [isRulesExpanded, setIsRulesExpanded] = useState(false);
   const [isRematchLoading, setIsRematchLoading] = useState(false);
 
@@ -29,8 +31,33 @@ export const GamePage: React.FC = () => {
     setSecretNumber: submitSecretNumber,
     makeGuess,
     rematch,
-    error
+    error,
+    teamStrategy,
+    updateTeamStrategy,
+    changeTeam,
+    timeoutGraceEndsAt
   } = useGame();
+  const [graceRemaining, setGraceRemaining] = useState(0);
+
+  const currentPlayer = currentRoom?.players.find(p => p.username === user?.username);
+  const myTeam = currentPlayer?.team;
+  const myTeamSize = myTeam ? currentRoom?.players.filter(p => p.team === myTeam).length : 0;
+  const teamStrategyEnabled = (myTeamSize ?? 0) > 1;
+
+  useEffect(() => {
+    if (!teamStrategyEnabled && activeStrategyTab === 'team') {
+      setActiveStrategyTab('personal');
+    }
+  }, [teamStrategyEnabled, activeStrategyTab]);
+  useEffect(() => {
+    if (!timeoutGraceEndsAt) { setGraceRemaining(0); return; }
+    const id = setInterval(() => {
+      const ms = timeoutGraceEndsAt - Date.now();
+      setGraceRemaining(ms > 0 ? Math.ceil(ms / 1000) : 0);
+      if (ms <= 0) clearInterval(id);
+    }, 250);
+    return () => clearInterval(id);
+  }, [timeoutGraceEndsAt]);
 
   // Timer for turn countdown
   useEffect(() => {
@@ -63,20 +90,9 @@ export const GamePage: React.FC = () => {
     );
   }
 
-  const currentPlayer = currentRoom.players.find(p => p.username === user?.username);
-  // Cache for user's own secret number to avoid flicker when generic broadcast omits it
-  const [cachedOwnSecret, setCachedOwnSecret] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (currentPlayer?.secret_number) {
-      // Update cache whenever personalized payload supplies it
-      setCachedOwnSecret(currentPlayer.secret_number);
-    }
-    // If we previously had a cache but personalized state not yet arrived, keep cache
-  }, [currentPlayer?.secret_number, currentPlayer?.id]);
-  const myTeam = currentPlayer?.team;
   const isMyTurn = currentRoom.current_turn_player === user?.username;
-  const canSetSecret = currentRoom.status === 'setting_numbers' && currentPlayer && !currentPlayer.has_secret_number;
+  const teamSecretSet = currentPlayer?.team === 'A' ? currentRoom.team_a_secret_set : currentPlayer?.team === 'B' ? currentRoom.team_b_secret_set : false;
+  const canSetSecret = (currentRoom.status === 'setting_numbers' || currentRoom.status === 'waiting') && currentPlayer && !teamSecretSet;
   const gameFinished = currentRoom.status === 'finished';
   const winner = currentRoom.players.find(p => p.is_winner);
 
@@ -168,11 +184,25 @@ export const GamePage: React.FC = () => {
 
   // (global availability toggler removed – summary grid now interactive)
 
+  // Collaborative vs personal strategy handling
+  const usingTeam = activeStrategyTab === 'team' && teamStrategyEnabled;
+  const effectiveSlotDigits: number[][] = usingTeam && teamStrategy ? teamStrategy.slot_digits : slotDigits;
+  const effectiveDraftGuess: string[] = usingTeam && teamStrategy ? teamStrategy.draft_guess : draftGuessDigits;
+  const effectiveNotes: string = usingTeam && teamStrategy ? teamStrategy.notes : notes;
+
+  const safeCloneSlots = (src: number[][]) => src.map(r => [...r]);
+  const applySlotDigits = (next: number[][]) => {
+    if (usingTeam) {
+      if (teamStrategy) updateTeamStrategy({ slot_digits: next });
+    } else {
+      setSlotDigits(next);
+    }
+  };
+
   const toggleSlotDigit = (slotIndex: number, digit: number) => {
-    setSlotDigits(prev => {
-      const copy = prev.map(row => [...row]);
+    applySlotDigits((() => {
+      const copy = safeCloneSlots(effectiveSlotDigits);
       const current = copy[slotIndex][digit];
-      // Cycle: -1 (unknown) -> 0 (possible) -> 1 (confirmed) -> 2 (cannot) -> -1
       let next: number;
       switch (current) {
         case -1: next = 0; break;
@@ -180,37 +210,38 @@ export const GamePage: React.FC = () => {
         case 1: next = 2; break;
         default: next = -1; break;
       }
-      // If setting confirmed (1), clear that digit's confirmed state in other slots automatically
       if (next === 1) {
         for (let s = 0; s < copy.length; s++) {
-          if (s !== slotIndex && copy[s][digit] === 1) copy[s][digit] = 0; // revert others to possible
+          if (s !== slotIndex && copy[s][digit] === 1) copy[s][digit] = 0;
         }
       }
       copy[slotIndex][digit] = next;
       return copy;
-    });
+    })());
   };
 
   // Bulk helpers
   const clearSlot = (slotIndex: number) => {
-    setSlotDigits(prev => prev.map((row, i) => i === slotIndex ? Array(10).fill(-1) : row));
+    applySlotDigits(effectiveSlotDigits.map((row, i) => i === slotIndex ? Array(10).fill(-1) : [...row]));
   };
   const markAllPossible = (slotIndex: number) => {
-    setSlotDigits(prev => prev.map((row, i) => i === slotIndex ? row.map(v => v === -1 ? 0 : v) : row));
+    applySlotDigits(effectiveSlotDigits.map((row, i) => i === slotIndex ? row.map(v => v === -1 ? 0 : v) : [...row]));
   };
   const markAllCannot = (slotIndex: number) => {
-    setSlotDigits(prev => prev.map((row, i) => i === slotIndex ? Array(10).fill(2) : row));
+    applySlotDigits(effectiveSlotDigits.map((row, i) => i === slotIndex ? Array(10).fill(2) : [...row]));
   };
-  const clearAllSlots = () => setSlotDigits([
-    Array(10).fill(-1), Array(10).fill(-1), Array(10).fill(-1), Array(10).fill(-1)
-  ]);
+  const clearAllSlots = () => {
+    applySlotDigits([
+      Array(10).fill(-1), Array(10).fill(-1), Array(10).fill(-1), Array(10).fill(-1)
+    ]);
+  };
 
   // Aggregated view per digit across all slots
   const aggregateDigitState = (digit: number): number => {
     // Return 1 if confirmed in any slot, 0 if possible somewhere (and not confirmed),
     // 2 if cannot everywhere, -1 if all unknown
     let anyUnknown = false, anyPossible = false, anyConfirmed = false;
-    for (const slot of slotDigits) {
+    for (const slot of effectiveSlotDigits) {
       const st = slot[digit];
       if (st === 1) anyConfirmed = true;
       else if (st === 0) anyPossible = true;
@@ -229,6 +260,7 @@ export const GamePage: React.FC = () => {
       <TopBar
         page="game"
         onBack={leaveRoom}
+        onHowToPlay={onHowToPlay}
         title={`Room ${currentRoom.name}`}
         subtitle={`${currentRoom.status.replace('_', ' ').toUpperCase()} • Team ${currentRoom.current_turn_team || (isMyTurn ? currentPlayer?.team : '')}`}
       />
@@ -246,10 +278,7 @@ export const GamePage: React.FC = () => {
                     <span>Your Turn!</span>
                   </>
                 ) : (
-                  <>
-                    <Clock className="w-8 h-8" />
-                    <span>{currentRoom.current_turn_player}'s Turn</span>
-                  </>
+                  <span>Opponent's Turn</span>
                 )}
               </div>
               {timeLeft !== null && (
@@ -258,84 +287,102 @@ export const GamePage: React.FC = () => {
                   <span className="font-bold">{timeLeft}s remaining</span>
                 </div>
               )}
+              {graceRemaining > 0 && (
+                <div className="mt-2 text-sm font-semibold text-warning-700 animate-pulse">
+                  Turn expired — skipping in {graceRemaining}s
+                </div>
+              )}
             </div>
           )}
 
           {/* Players Panel in Header - Compact */}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Players List - Compact */}
-            <div>
-              <h2 className="text-md font-bold text-secondary-900 mb-2 flex items-center space-x-2">
-                <Users className="w-4 h-4 text-primary-600" />
-                <span>Players</span>
-              </h2>
-              <div className="flex flex-wrap gap-2">
-                {currentRoom.players.map(player => (
-                  <div
-                    key={player.id}
-                    className={`px-3 py-2 rounded-lg border transition-all text-sm ${player.username === user?.username
-                      ? 'border-primary-300 bg-primary-50 text-primary-900'
-                      : 'border-neutral-200 bg-neutral-50 text-secondary-800'
-                      }`}
-                  >
-                    <div className="flex items-center space-x-2">
-                      <span className="font-medium">{player.username}</span>
-                      <span className={`inline-block text-xs px-1.5 py-0.5 rounded-full font-bold ${player.team === 'A' ? 'bg-primary-200 text-primary-800' : 'bg-secondary-200 text-secondary-800'
-                        }`}>
-                        {player.team || '?'}
-                      </span>
-                      {player.username === user?.username && (
-                        <span className="text-primary-600 text-xs">(You)</span>
-                      )}
-                      {player.is_winner && (
-                        <Trophy className="w-3 h-3 text-warning-500" />
+            <div className="space-y-4">
+              {(['A', 'B'] as const).map(teamKey => {
+                const teamPlayers = currentRoom.players.filter(p => p.team === teamKey);
+                const teamSecretSetFlag = teamKey === 'A' ? currentRoom.team_a_secret_set : currentRoom.team_b_secret_set;
+                const setter = teamKey === 'A' ? currentRoom.team_a_set_by_username : currentRoom.team_b_set_by_username;
+                return (
+                  <div key={teamKey} className={`rounded-xl border-2 p-4 ${teamKey === 'A' ? 'border-primary-200 bg-primary-50' : 'border-secondary-200 bg-secondary-50'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-bold px-2 py-1 rounded-full ${teamKey === 'A' ? 'bg-primary-500 text-white' : 'bg-secondary-500 text-white'}`}>Team {teamKey}</span>
+                        {teamSecretSetFlag ? (
+                          <span className="text-xs text-success-600 font-semibold flex items-center gap-1">✅ Secret set{setter ? ` by ${setter}` : ''}</span>
+                        ) : (
+                          <span className="text-xs text-warning-600 font-semibold">Waiting secret</span>
+                        )}
+                      </div>
+                      {(currentRoom.status === 'waiting' || currentRoom.status === 'setting_numbers') && (
+                        <span className="text-[11px] text-neutral-600">{teamPlayers.length} player{teamPlayers.length !== 1 ? 's' : ''}</span>
                       )}
                     </div>
-                    <div className="text-xs text-secondary-600 mt-0.5">
-                      {player.has_secret_number ? '✅ Ready' : '❌ Setting...'}
+                    <div className="flex flex-wrap gap-2">
+                      {teamPlayers.map(player => {
+                        const me = player.username === user?.username;
+                        return (
+                          <div key={player.id} className={`px-3 py-2 rounded-lg border text-xs flex flex-col gap-1 ${me ? 'bg-white border-black/20 shadow-sm' : 'bg-white border-neutral-300'}`}>
+                            <div className="flex items-center gap-1">
+                              <span className="font-semibold">{player.username}</span>
+                              {me && <span className="text-primary-600">(You)</span>}
+                              {player.is_winner && <Trophy className="w-3 h-3 text-warning-500" />}
+                            </div>
+                            <div className="text-[10px] text-neutral-600 flex items-center gap-2">
+                              {teamSecretSetFlag ? 'Ready' : 'Setting...'}
+                              {me && !teamSecretSetFlag && (currentRoom.status === 'waiting' || currentRoom.status === 'setting_numbers') && (
+                                <span className="flex gap-1">
+                                  <button onClick={() => changeTeam('A')} disabled={player.team === 'A'} className={`px-1 py-0.5 rounded border ${player.team === 'A' ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-primary-600 hover:bg-primary-100 border-primary-300'}`}>A</button>
+                                  <button onClick={() => changeTeam('B')} disabled={player.team === 'B'} className={`px-1 py-0.5 rounded border ${player.team === 'B' ? 'bg-secondary-600 text-white border-secondary-600' : 'bg-white text-secondary-600 hover:bg-secondary-100 border-secondary-300'}`}>B</button>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {teamPlayers.length === 0 && (
+                        <div className="text-[11px] italic text-neutral-500">No players yet</div>
+                      )}
                     </div>
                   </div>
-                ))}
-              </div>
+                );
+              })}
+              {(currentRoom.status === 'waiting' || currentRoom.status === 'setting_numbers') && (
+                <div className="text-[11px] text-secondary-600 italic">Players can switch teams until their team secret is set.</div>
+              )}
             </div>
-
-            {/* Secret Numbers Section */}
-            <div>
-              <h2 className="text-md font-bold text-secondary-900 mb-2 flex items-center space-x-2">
+            <div className="space-y-4">
+              <h2 className="text-md font-bold text-secondary-900 mb-2 flex items-center gap-2">
                 <Target className="w-4 h-4 text-secondary-600" />
-                <span>Secret Numbers</span>
+                <span>Team Secrets</span>
               </h2>
-              <div className="space-y-2">
-                {currentRoom.players.map(player => (
-                  <div key={player.id} className="flex items-center justify-between text-sm">
-                    <span className="font-medium text-secondary-700">{player.username}</span>
-                    {player.username === user?.username ? (
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-1 rounded bg-primary-100 font-mono text-sm">
-                          {showSecret || currentRoom.status === 'finished'
-                            ? ((player.secret_number || cachedOwnSecret) || '----')
-                            : '••••'}
-                        </span>
-                        <button
-                          onClick={() => setShowSecret(!showSecret)}
-                          className="text-primary-600 hover:text-primary-800 text-xs px-1"
-                        >
+              {(['A', 'B'] as const).map(teamKey => {
+                const secretSet = teamKey === 'A' ? currentRoom.team_a_secret_set : currentRoom.team_b_secret_set;
+                const setter = teamKey === 'A' ? currentRoom.team_a_set_by_username : currentRoom.team_b_set_by_username;
+                const isMyTeam = myTeam === teamKey;
+                const showValue = (secretSet && currentRoom.status === 'finished') || (isMyTeam && (showSecret || currentRoom.status === 'finished'));
+                let secretDisplay = '••••';
+                if (showValue) {
+                  const teammate = currentRoom.players.find(p => p.team === teamKey && p.secret_number);
+                  secretDisplay = teammate?.secret_number || '----';
+                }
+                return (
+                  <div key={teamKey} className="flex items-center justify-between bg-white border rounded-lg px-4 py-3 text-sm">
+                    <div className="flex flex-col">
+                      <span className="font-semibold">Team {teamKey} Secret</span>
+                      <span className="text-[11px] text-neutral-500">{secretSet ? `Set${setter ? ' by ' + setter : ''}` : 'Not set'}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-1 rounded font-mono ${secretSet ? 'bg-neutral-100' : 'bg-neutral-50 text-neutral-400'}`}>{secretDisplay}</span>
+                      {isMyTeam && secretSet && currentRoom.status !== 'finished' && (
+                        <button onClick={() => setShowSecret(!showSecret)} className="text-primary-600 hover:text-primary-800 text-xs px-1">
                           {showSecret ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                         </button>
-                      </div>
-                    ) : currentRoom.status === 'finished' && player.secret_number ? (
-                      <span className="px-2 py-1 rounded bg-neutral-100 font-mono text-sm">
-                        {player.secret_number}
-                      </span>
-                    ) : (
-                      <span className="text-neutral-500 text-xs">
-                        {player.has_secret_number ? 'Hidden' : 'Not set'}
-                      </span>
-                    )}
+                      )}
+                    </div>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
           </div>
 
@@ -366,7 +413,7 @@ export const GamePage: React.FC = () => {
               <div className="bg-gradient-to-br from-primary-50 to-secondary-50 rounded-2xl shadow-brand p-6 border-2 border-primary-200">
                 <h2 className="text-2xl font-bold text-primary-900 mb-4 flex items-center">
                   <Target className="w-6 h-6 mr-2" />
-                  Set Your Secret Number
+                  Set Team {myTeam} Secret Number
                 </h2>
                 <div className="space-y-4">
                   <div>
@@ -380,6 +427,11 @@ export const GamePage: React.FC = () => {
                         onChange={(e) => {
                           const value = e.target.value.replace(/\D/g, '').slice(0, 4);
                           setSecretNumber(value);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSetSecret();
+                          }
                         }}
                         className="flex-1 px-6 py-4 border-2 border-primary-300 rounded-xl focus:ring-4 focus:ring-primary-200 focus:border-primary-500 text-center text-2xl font-mono font-bold"
                         placeholder="1234"
@@ -426,16 +478,20 @@ export const GamePage: React.FC = () => {
                           className="w-16 h-16 border-2 border-success-300 rounded-xl focus:ring-4 focus:ring-success-200 focus:border-success-500 text-center text-2xl font-mono font-bold"
                           placeholder="0"
                           maxLength={1}
+                          disabled={graceRemaining > 0}
                         />
                       ))}
                     </div>
                     {guessDigits.join('').length === 4 && new Set(guessDigits.join('')).size !== 4 && (
                       <p className="text-warning-800 text-sm mt-2 font-medium text-center">All digits must be unique</p>
                     )}
+                    {graceRemaining > 0 && (
+                      <p className="text-warning-700 text-xs mt-2 font-medium text-center">Turn timeout grace period; guessing disabled.</p>
+                    )}
                   </div>
                   <button
                     onClick={handleMakeGuess}
-                    disabled={guessDigits.join('').length !== 4 || new Set(guessDigits.join('')).size !== 4}
+                    disabled={guessDigits.join('').length !== 4 || new Set(guessDigits.join('')).size !== 4 || graceRemaining > 0}
                     className="bg-gradient-to-r from-success-600 to-success-700 hover:from-success-700 hover:to-success-800 disabled:from-neutral-400 disabled:to-neutral-400 text-white px-8 py-4 rounded-xl flex items-center justify-center space-x-3 font-bold text-lg transition-all w-full shadow-brand"
                   >
                     <Send className="w-6 h-6" />
@@ -563,9 +619,9 @@ export const GamePage: React.FC = () => {
             {/* Opponents' Guesses */}
             <div className="bg-neutral-50 rounded-2xl shadow-brand p-6 border border-neutral-200">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-secondary-700 flex items-center">
-                  <Swords className="w-6 h-6 mr-3 text-secondary-500" />
-                  Opponent Guesses
+                <h2 className="text-xl font-bold text-secondary-700 flex items-center gap-2">
+                  <Swords className="w-6 h-6 text-secondary-500" />
+                  Team {myTeam === 'A' ? 'B' : 'A'} Guesses
                 </h2>
                 <div className="bg-neutral-200 text-secondary-700 px-3 py-1 rounded-full text-sm font-bold">
                   {currentRoom.guesses.filter(g => currentRoom.players.find(p => p.username === g.player)?.team !== myTeam).length} attempts
@@ -618,12 +674,36 @@ export const GamePage: React.FC = () => {
                 )}
               </div>
             </div>
-            {/* Enhanced Notes & Strategy */}
+            {/* Enhanced Notes & Strategy with Team/Personal Tabs */}
             <div className="bg-gradient-to-br from-secondary-50 to-neutral-50 rounded-2xl shadow-brand p-6 border-2 border-secondary-200">
-              <h2 className="text-xl font-bold text-secondary-900 mb-4 flex items-center">
-                <Brain className="w-6 h-6 mr-2 text-secondary-600" />
-                Strategy & Notes
-              </h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-secondary-900 flex items-center">
+                  <Brain className="w-6 h-6 mr-2 text-secondary-600" />
+                  Strategy & Notes
+                </h2>
+                {teamStrategyEnabled && (
+                  <div className="flex rounded-lg overflow-hidden border border-secondary-300">
+                    <button
+                      onClick={() => setActiveStrategyTab('team')}
+                      className={`px-4 py-2 text-sm font-semibold transition-colors ${activeStrategyTab === 'team' ? 'bg-secondary-600 text-white' : 'bg-white text-secondary-600 hover:bg-secondary-100'}`}
+                    >Team</button>
+                    <button
+                      onClick={() => setActiveStrategyTab('personal')}
+                      className={`px-4 py-2 text-sm font-semibold transition-colors ${activeStrategyTab === 'personal' ? 'bg-secondary-600 text-white' : 'bg-white text-secondary-600 hover:bg-secondary-100'}`}
+                    >Personal</button>
+                  </div>
+                )}
+              </div>
+              {usingTeam && (
+                <div className="mb-3 text-[11px] text-secondary-600 flex items-center justify-between">
+                  <span>Shared with Team {myTeam}</span>
+                  {teamStrategy ? (
+                    <span className="italic">v{teamStrategy.version} • Last: {teamStrategy.last_editor || '—'} {teamStrategy.updated_at ? 'at ' + new Date(teamStrategy.updated_at).toLocaleTimeString() : ''}</span>
+                  ) : (
+                    <span className="italic">Loading team strategy...</span>
+                  )}
+                </div>
+              )}
 
               {/* Position Analysis - Columns by Slot */}
               <div className="mb-6">
@@ -649,21 +729,19 @@ export const GamePage: React.FC = () => {
                       else { cls = 'bg-primary-400 text-white opacity-85 hover:opacity-100 border border-primary-500'; label = 'Eliminated everywhere'; }
 
                       const onClick = () => {
-                        setSlotDigits(prev => {
-                          const copy = prev.map(row => [...row]);
+                        applySlotDigits((() => {
+                          const copy = safeCloneSlots(effectiveSlotDigits);
                           if (agg === 2) {
-                            // Restore: set fully eliminated digit back to unknown where not confirmed
                             for (let s = 0; s < copy.length; s++) {
                               if (copy[s][d] === 2) copy[s][d] = -1;
                             }
                           } else {
-                            // Eliminate globally (except confirmed slots)
                             for (let s = 0; s < copy.length; s++) {
                               if (copy[s][d] !== 1) copy[s][d] = 2;
                             }
                           }
                           return copy;
-                        });
+                        })());
                       };
 
                       return (
@@ -681,48 +759,48 @@ export const GamePage: React.FC = () => {
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {[0, 1, 2, 3].map(slotIndex => (
-                  <div key={slotIndex} className="bg-white rounded-xl p-3 border border-secondary-200 flex flex-col shadow-sm">
-                    <div className="text-center mb-2 text-[14px] font-semibold text-secondary-700">
-                    <span>Slot {slotIndex + 1}</span>
-                    </div>
-                    <div className="flex gap-1 justify-center mb-3">
-                    <button title="Mark unknown digits as possible" onClick={() => markAllPossible(slotIndex)} className="px-1.5 py-0.5 rounded bg-warning-100 text-warning-700 hover:bg-warning-200 text-[11px] border border-warning-300">?→P</button>
-                    <button title="Mark all digits cannot" onClick={() => markAllCannot(slotIndex)} className="px-1.5 py-0.5 rounded bg-primary-100 text-primary-700 hover:bg-primary-200 text-[11px] border border-primary-300">All X</button>
-                    <button title="Clear slot" onClick={() => clearSlot(slotIndex)} className="px-1.5 py-0.5 rounded bg-neutral-100 text-secondary-600 hover:bg-neutral-200 text-[11px] border border-neutral-500">Clr</button>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                    {Array.from({ length: 10 }).map((_, digit) => {
-                      const st = slotDigits[slotIndex][digit];
-                      let cls = '';
-                      if (st === -1) cls = 'bg-neutral-100 text-secondary-600 hover:bg-neutral-200 border border-neutral-500';
-                      else if (st === 0) cls = 'bg-warning-400 text-white hover:bg-warning-500 border border-warning-500';
-                      else if (st === 1) cls = 'bg-success-500 text-white hover:bg-success-600 ring-2 ring-success-300 border border-success-600';
-                      else cls = 'bg-primary-400 text-white hover:bg-primary-500 opacity-85 border border-primary-500';
-                      return (
-                      <div key={digit} className="flex items-center gap-1">
-                        <button
-                        onClick={() => toggleSlotDigit(slotIndex, digit)}
-                        title={`Digit ${digit}: ${st === -1 ? 'Unknown' : st === 0 ? 'Possible' : st === 1 ? 'Confirmed here' : 'Eliminated here'}`}
-                        className={`flex-1 h-8 rounded text-sm font-bold transition-all ${cls}`}
-                        >
-                        {digit}
-                        </button>
-                        <button
-                        onClick={() => setSlotDigits(prev => {
-                          const copy = prev.map(row => [...row]);
-                          copy[slotIndex][digit] = -1;
-                          return copy;
-                        })}
-                        title={`Reset digit ${digit} to unknown`}
-                        className="w-5 h-5 rounded-full bg-neutral-200 hover:bg-neutral-300 text-neutral-600 hover:text-neutral-800 text-xs flex items-center justify-center transition-colors"
-                        >
-                        <X className="w-3 h-3" />
-                        </button>
+                    <div key={slotIndex} className="bg-white rounded-xl p-3 border border-secondary-200 flex flex-col shadow-sm">
+                      <div className="text-center mb-2 text-[14px] font-semibold text-secondary-700">
+                        <span>Slot {slotIndex + 1}</span>
                       </div>
-                      );
-                    })}
+                      <div className="flex gap-1 justify-center mb-3">
+                        <button title="Mark unknown digits as possible" onClick={() => markAllPossible(slotIndex)} className="px-1.5 py-0.5 rounded bg-warning-100 text-warning-700 hover:bg-warning-200 text-[11px] border border-warning-300">?→P</button>
+                        <button title="Mark all digits cannot" onClick={() => markAllCannot(slotIndex)} className="px-1.5 py-0.5 rounded bg-primary-100 text-primary-700 hover:bg-primary-200 text-[11px] border border-primary-300">All X</button>
+                        <button title="Clear slot" onClick={() => clearSlot(slotIndex)} className="px-1.5 py-0.5 rounded bg-neutral-100 text-secondary-600 hover:bg-neutral-200 text-[11px] border border-neutral-500">Clr</button>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        {Array.from({ length: 10 }).map((_, digit) => {
+                          const st = effectiveSlotDigits[slotIndex][digit];
+                          let cls = '';
+                          if (st === -1) cls = 'bg-neutral-100 text-secondary-600 hover:bg-neutral-200 border border-neutral-500';
+                          else if (st === 0) cls = 'bg-warning-400 text-white hover:bg-warning-500 border border-warning-500';
+                          else if (st === 1) cls = 'bg-success-500 text-white hover:bg-success-600 ring-2 ring-success-300 border border-success-600';
+                          else cls = 'bg-primary-400 text-white hover:bg-primary-500 opacity-85 border border-primary-500';
+                          return (
+                            <div key={digit} className="flex items-center gap-1">
+                              <button
+                                onClick={() => toggleSlotDigit(slotIndex, digit)}
+                                title={`Digit ${digit}: ${st === -1 ? 'Unknown' : st === 0 ? 'Possible' : st === 1 ? 'Confirmed here' : 'Eliminated here'}`}
+                                className={`flex-1 h-8 rounded text-sm font-bold transition-all ${cls}`}
+                              >
+                                {digit}
+                              </button>
+                              <button
+                                onClick={() => applySlotDigits((() => {
+                                  const copy = safeCloneSlots(effectiveSlotDigits);
+                                  copy[slotIndex][digit] = -1;
+                                  return copy;
+                                })())}
+                                title={`Reset digit ${digit} to unknown`}
+                                className="w-5 h-5 rounded-full bg-neutral-200 hover:bg-neutral-300 text-neutral-600 hover:text-neutral-800 text-xs flex items-center justify-center transition-colors"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
                   ))}
                 </div>
 
@@ -739,36 +817,54 @@ export const GamePage: React.FC = () => {
               <div className="mb-6">
                 <h3 className="text-sm font-bold text-secondary-700 mb-2">Draft Guess</h3>
                 <div className="flex items-center gap-2 justify-center">
-                  {draftGuessDigits.map((digit, index) => (
+                  {effectiveDraftGuess.map((digit, index) => (
                     <input
                       key={index}
                       id={`draft-${index}`}
                       type="text"
                       value={digit}
-                      onChange={(e) => handleDraftDigitChange(index, e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, '').slice(0, 1);
+                        if (usingTeam) {
+                          if (!teamStrategy) return;
+                          if (val.length <= 1) {
+                            const arr = [...effectiveDraftGuess];
+                            arr[index] = val;
+                            updateTeamStrategy({ draft_guess: arr });
+                          }
+                        } else {
+                          handleDraftDigitChange(index, val);
+                        }
+                      }}
                       className="w-12 h-12 border-2 border-secondary-300 rounded-lg focus:ring-4 focus:ring-secondary-100 focus:border-secondary-500 text-center text-lg font-mono font-bold"
                       placeholder="0"
                       maxLength={1}
                     />
                   ))}
                 </div>
-                {draftGuessDigits.join('').length === 4 && new Set(draftGuessDigits.join('')).size !== 4 && (
+                {effectiveDraftGuess.join('').length === 4 && new Set(effectiveDraftGuess.join('')).size !== 4 && (
                   <p className="text-warning-800 text-xs mt-2 text-center">Digits must be unique</p>
                 )}
                 <div className="mt-3 flex items-center gap-2 justify-center">
                   <button
                     onClick={() => {
-                      setGuessDigits(draftGuessDigits);
+                      setGuessDigits(effectiveDraftGuess);
                       const first = document.getElementById('guess-0');
                       first?.focus();
                     }}
-                    disabled={draftGuessDigits.join('').length !== 4 || new Set(draftGuessDigits.join('')).size !== 4}
+                    disabled={effectiveDraftGuess.join('').length !== 4 || new Set(effectiveDraftGuess.join('')).size !== 4}
                     className="px-4 py-2 rounded-lg font-semibold text-white bg-primary-600 disabled:bg-neutral-400 hover:bg-primary-700 transition-colors shadow-brand"
                   >
                     Copy to Guess
                   </button>
                   <button
-                    onClick={() => setDraftGuessDigits(['', '', '', ''])}
+                    onClick={() => {
+                      if (usingTeam) {
+                        updateTeamStrategy({ draft_guess: ['', '', '', ''] });
+                      } else {
+                        setDraftGuessDigits(['', '', '', '']);
+                      }
+                    }}
                     className="px-4 py-2 rounded-lg font-semibold text-primary-700 bg-primary-100 hover:bg-primary-200 transition-colors"
                   >
                     Clear
@@ -780,9 +876,15 @@ export const GamePage: React.FC = () => {
               <div>
                 <h3 className="text-sm font-bold text-secondary-700 mb-2">Notes</h3>
                 <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Track patterns, combinations, deductions..."
+                  value={effectiveNotes}
+                  onChange={(e) => {
+                    if (usingTeam) {
+                      updateTeamStrategy({ notes: e.target.value });
+                    } else {
+                      setNotes(e.target.value);
+                    }
+                  }}
+                  placeholder={usingTeam ? 'Shared team notes...' : 'Track patterns, combinations, deductions...'}
                   className="w-full min-h-32 p-4 border-2 border-secondary-200 rounded-xl focus:ring-4 focus:ring-secondary-100 focus:border-secondary-400 text-sm resize-none"
                 />
               </div>
@@ -815,39 +917,47 @@ export const GamePage: React.FC = () => {
           <div className="bg-white rounded-2xl shadow-brand-lg w-full max-w-lg p-6 border border-neutral-200">
             <div className="text-center mb-6">
               <div className="relative">
-              {/* Celebration background effects */}
-              <div className="absolute inset-0 bg-gradient-to-r from-warning-100 via-success-100 to-primary-100 rounded-2xl opacity-50 animate-pulse"></div>
-              
-              {/* Main winner announcement */}
-              <div className="relative bg-gradient-to-br from-warning-50 to-success-50 rounded-2xl p-8 border-4 border-warning-300 shadow-xl">
-                <div className="flex items-center justify-center mb-4">
-                <div className="bg-warning-400 p-4 rounded-full animate-bounce shadow-lg">
-                  <Trophy className="w-12 h-12 text-white" />
-                </div>
-                </div>
-                
-                <h2 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-warning-600 to-success-600 mb-2">
-                🎉 Game Over! 🎉
-                </h2>
-                
-                <div className="text-2xl font-bold text-secondary-800 mb-4">
-                <span className="text-success-700 font-extrabold text-3xl">
-                  {currentRoom.winner_username || winner?.username || '—'}
-                </span>
-                <div className="text-lg text-secondary-600 mt-1">
-                  wins the game!
-                </div>
-                </div>
+                {/* Celebration background effects */}
+                <div className="absolute inset-0 bg-gradient-to-r from-warning-100 via-success-100 to-primary-100 rounded-2xl opacity-50 animate-pulse"></div>
 
-                {/* Close button moved to top right corner */}
-                <button
-                onClick={() => setShowWinModal(false)}
-                className="absolute top-4 right-4 text-secondary-400 hover:text-secondary-600 transition-colors"
-                aria-label="Close"
-                >
-                <X className="w-6 h-6" />
-                </button>
-              </div>
+                {/* Main winner announcement */}
+                <div className="relative bg-gradient-to-br from-warning-50 to-success-50 rounded-2xl p-8 border-4 border-warning-300 shadow-xl">
+                  <div className="flex items-center justify-center mb-4">
+                    <div className="bg-warning-400 p-4 rounded-full animate-bounce shadow-lg">
+                      <Trophy className="w-12 h-12 text-white" />
+                    </div>
+                  </div>
+
+                  <h2 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-warning-600 to-success-600 mb-2">
+                    🎉 Game Over! 🎉
+                  </h2>
+
+                  <div className="text-2xl font-bold text-secondary-800 mb-4">
+                    {currentRoom.winner_team ? (
+                      <>
+                        <span className="text-success-700 font-extrabold text-3xl">Team {currentRoom.winner_team}</span>
+                        <div className="text-lg text-secondary-600 mt-1">wins the game!</div>
+                        <div className="mt-3 text-sm text-secondary-700 font-medium">
+                          {currentRoom.players.filter(p => p.team === currentRoom.winner_team).map(p => p.username).join(', ')}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-success-700 font-extrabold text-3xl">{currentRoom.winner_username || winner?.username || '—'}</span>
+                        <div className="text-lg text-secondary-600 mt-1">wins the game!</div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Close button moved to top right corner */}
+                  <button
+                    onClick={() => setShowWinModal(false)}
+                    className="absolute top-4 right-4 text-secondary-400 hover:text-secondary-600 transition-colors"
+                    aria-label="Close"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
               </div>
             </div>
             <div className="border rounded-xl overflow-hidden">

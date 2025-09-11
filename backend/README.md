@@ -1,6 +1,6 @@
-# Bulls and Cows Web Game Backend
+# Numdle Web Game Backend
 
-A real-time multiplayer implementation of the Bulls and Cows (also known as Cows and Bulls) number guessing game using Django, Django Channels, and WebSockets.
+A real-time multiplayer implementation of the Numdle (also known as Cows and Bulls) number guessing game using Django, Django Channels, and WebSockets.
 
 ## Game Rules
 

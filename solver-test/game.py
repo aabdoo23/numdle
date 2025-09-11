@@ -1,5 +1,5 @@
 """
-Core game logic for the 4-digit Bulls and Cows game.
+Core game logic for the 4-digit Numdle game.
 """
 
 from itertools import permutations

@@ -1,5 +1,5 @@
 """
-Performance analysis tools for Bulls and Cows strategies.
+Performance analysis tools for Numdle strategies.
 """
 
 import time

@@ -3,7 +3,8 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.contrib.auth.models import User
 from django.utils import timezone
-from .models import GameRoom, Player, Guess
+from .models import GameRoom, Player, Guess, TeamStrategy
+from .tasks import check_turn_timeout
 import asyncio
 
 
@@ -65,6 +66,14 @@ class GameConsumer(AsyncWebsocketConsumer):
                 }))
         elif message_type == 'get_room_state':
             await self.send_room_state()
+        elif message_type == 'get_team_strategy':
+            await self.send_team_strategy()
+        elif message_type == 'update_team_strategy':
+            await self.update_team_strategy(data)
+        elif message_type == 'change_team':
+            await self.change_team(data.get('team'))
+            # After team change broadcast updated state so everyone sees new teams
+            await self.send_room_state()
 
     @database_sync_to_async
     def add_player_to_room(self):
@@ -118,25 +127,43 @@ class GameConsumer(AsyncWebsocketConsumer):
     def set_secret_number(self, number):
         try:
             player = Player.objects.get(user=self.user, room_id=self.room_id)
-            if player.validate_secret_number(number):
-                player.secret_number = number
-                player.save()
-                
-                # Check if all players have set their numbers
-                room = player.room
-                if room.status == GameRoom.SETTING_NUMBERS and room.all_numbers_set:
-                    room.status = GameRoom.PLAYING
-                    # Set first turn to Team A's earliest joined player
-                    first_a = room.players.filter(team='A').order_by('joined_at').first()
-                    if first_a:
-                        room.current_turn_player = first_a.user
-                        room.current_turn_team = 'A'
-                        room.turn_start_time = timezone.now()
-                        room.save()
-                
-                return True, "Secret number set successfully"
-            else:
+            if not player.validate_secret_number(number):
                 return False, "Invalid secret number. Must be 4 unique digits."
+            room = player.room
+            # Determine team
+            team = player.team or 'A'
+            # If team secret already set, reject (prevent overwriting)
+            if team == 'A' and room.team_a_secret:
+                return False, "Team A secret already set"
+            if team == 'B' and room.team_b_secret:
+                return False, f"Team {team} secret already set"
+
+            # Set team secret and assign to all teammates' player.secret_number for compatibility
+            if team == 'A':
+                room.team_a_secret = number
+                room.team_a_set_by = player
+            else:
+                room.team_b_secret = number
+                room.team_b_set_by = player
+            room.save(update_fields=['team_a_secret','team_b_secret','team_a_set_by','team_b_set_by'])
+            for teammate in room.players.filter(team=team):
+                if teammate.secret_number != number:
+                    teammate.secret_number = number
+                    teammate.save(update_fields=['secret_number'])
+
+            # If both secrets set move to PLAYING and init first turn (Team A first)
+            if room.status in (GameRoom.SETTING_NUMBERS, GameRoom.WAITING) and room.team_a_secret and room.team_b_secret:
+                room.status = GameRoom.PLAYING
+                first_a = room.players.filter(team='A').order_by('joined_at').first()
+                if first_a:
+                    room.current_turn_player = first_a.user
+                    room.current_turn_team = 'A'
+                    room.turn_start_time = timezone.now()
+                room.save()
+                # Schedule first turn timeout
+                if room.turn_time_limit:
+                    check_turn_timeout.apply_async(args=[str(room.id)], countdown=room.turn_time_limit)
+            return True, "Team secret set"
         except Player.DoesNotExist:
             return False, "Player not found"
 
@@ -221,6 +248,9 @@ class GameConsumer(AsyncWebsocketConsumer):
                         break
                 room.turn_start_time = timezone.now()
                 room.save()
+                # Schedule next turn timeout
+                if room.turn_time_limit:
+                    check_turn_timeout.apply_async(args=[str(room.id)], countdown=room.turn_time_limit)
             
             return True, {
                 'guess': guess_number,
@@ -245,19 +275,38 @@ class GameConsumer(AsyncWebsocketConsumer):
             room = GameRoom.objects.get(id=self.room_id)
             players = []
             finished = room.status == GameRoom.FINISHED
+
+            # Determine current user's team (for personalized view) so teammates can all see the shared team secret
+            current_user_team = None
+            if personalized and current_user_id:
+                try:
+                    current_player_obj = room.players.get(user_id=current_user_id)
+                    current_user_team = current_player_obj.team
+                except Player.DoesNotExist:
+                    current_user_team = None
+
             for player in room.players.all():
                 reveal_secret = False
+                team_secret = room.team_a_secret if player.team == 'A' else room.team_b_secret if player.team == 'B' else ''
+
                 if finished:
                     reveal_secret = True  # end of game: reveal all
-                elif personalized and current_user_id and player.user_id == current_user_id:
-                    reveal_secret = True  # only reveal requesting player's own secret mid‑game
+                elif personalized and current_user_id:
+                    # Reveal if this is the requesting player OR if it's a teammate (shared team secret concept)
+                    if player.user_id == current_user_id:
+                        reveal_secret = True
+                    elif current_user_team and player.team == current_user_team and team_secret:
+                        reveal_secret = True
+
+                # Mirror team secret into effective_secret so front-end can pick it up uniformly
+                effective_secret = team_secret or player.secret_number
                 players.append({
                     'id': player.id,
                     'username': player.user.username,
-                    'has_secret_number': bool(player.secret_number),
+                    'has_secret_number': bool(team_secret),
                     'is_winner': player.is_winner,
                     'team': player.team,
-                    **({'secret_number': player.secret_number} if reveal_secret else {})
+                    **({'secret_number': effective_secret} if (reveal_secret or finished) else {})
                 })
 
             guesses = []
@@ -283,7 +332,12 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'turn_start_time': room.turn_start_time.isoformat() if room.turn_start_time else None,
                 'turn_time_limit': room.turn_time_limit,
                 'guesses': guesses,
-                'winner_username': winner.user.username if winner else None
+                'winner_username': winner.user.username if winner else None,
+                'winner_team': winner.team if winner else None,
+                'team_a_secret_set': bool(room.team_a_secret),
+                'team_b_secret_set': bool(room.team_b_secret),
+                'team_a_set_by_username': room.team_a_set_by.user.username if room.team_a_set_by else None,
+                'team_b_set_by_username': room.team_b_set_by.user.username if room.team_b_set_by else None,
             }
         except GameRoom.DoesNotExist:
             return None
@@ -315,11 +369,132 @@ class GameConsumer(AsyncWebsocketConsumer):
                     'type': 'room_state_update',
                     'data': personal_state
                 }))
+            # Also push team strategy init for this user
+            await self.send_team_strategy(init=True)
 
     async def room_state_update(self, event):
         await self.send(text_data=json.dumps({
             'type': 'room_state_update',
             'data': event['room_state']
+        }))
+
+    async def refresh_room_state(self, event):
+        # Task requested a state refresh after turn skip
+        await self.send_room_state()
+
+    # --- Team Strategy Section ---
+    @database_sync_to_async
+    def _get_player_and_strategy(self):
+        try:
+            player = Player.objects.get(user=self.user, room_id=self.room_id)
+            ts, _ = TeamStrategy.objects.get_or_create(
+                room_id=self.room_id,
+                team=player.team or 'A',
+                defaults={
+                    'slot_digits': [[-1]*10 for _ in range(4)],
+                    'draft_guess': ['', '', '', '']
+                }
+            )
+            ts.ensure_defaults(save=True)
+            return player, ts
+        except Player.DoesNotExist:
+            return None, None
+
+    @database_sync_to_async
+    def _apply_team_strategy_update(self, team, version, notes, slot_digits, draft_guess):
+        try:
+            ts = TeamStrategy.objects.get(room_id=self.room_id, team=team)
+            if version != ts.version:
+                return False, self._serialize_team_strategy(ts)
+            # Validation
+            if not isinstance(slot_digits, list) or len(slot_digits) != 4:
+                return False, self._serialize_team_strategy(ts)
+            for row in slot_digits:
+                if not isinstance(row, list) or len(row) != 10:
+                    return False, self._serialize_team_strategy(ts)
+            if not isinstance(draft_guess, list) or len(draft_guess) != 4:
+                return False, self._serialize_team_strategy(ts)
+            ts.notes = notes if isinstance(notes, str) else ts.notes
+            ts.slot_digits = slot_digits
+            ts.draft_guess = draft_guess
+            ts.version += 1
+            ts.last_editor = self.user if getattr(self.user, 'is_authenticated', False) else None
+            ts.save()
+            return True, self._serialize_team_strategy(ts)
+        except TeamStrategy.DoesNotExist:
+            return False, None
+
+    # Synchronous helper (must NOT be decorated) used inside other sync DB functions
+    def _serialize_team_strategy(self, ts):
+        if not ts:
+            return None
+        return {
+            'team': ts.team,
+            'notes': ts.notes,
+            'slot_digits': ts.slot_digits,
+            'draft_guess': ts.draft_guess,
+            'version': ts.version,
+            'updated_at': ts.updated_at.isoformat() if ts.updated_at else None,
+            'last_editor': ts.last_editor.username if ts.last_editor else None
+        }
+
+    @database_sync_to_async
+    def _get_serialized_strategy_for_user(self):
+        try:
+            player = Player.objects.get(user=self.user, room_id=self.room_id)
+            ts, _ = TeamStrategy.objects.get_or_create(
+                room_id=self.room_id,
+                team=player.team or 'A',
+                defaults={
+                    'slot_digits': [[-1]*10 for _ in range(4)],
+                    'draft_guess': ['', '', '', '']
+                }
+            )
+            ts.ensure_defaults(save=True)
+            return self._serialize_team_strategy(ts)
+        except Player.DoesNotExist:
+            return None
+
+    async def send_team_strategy(self, init=False):
+        payload = await self._get_serialized_strategy_for_user()
+        if not payload:
+            return
+        await self.send(text_data=json.dumps({
+            'type': 'team_strategy_init' if init else 'team_strategy_update',
+            'data': payload
+        }))
+
+    async def update_team_strategy(self, data):
+        player, ts = await self._get_player_and_strategy()
+        if not player or not ts:
+            return
+        ok, payload = await self._apply_team_strategy_update(
+            ts.team,
+            data.get('version'),
+            data.get('notes', ts.notes),
+            data.get('slot_digits', ts.slot_digits),
+            data.get('draft_guess', ts.draft_guess)
+        )
+        if payload is None:
+            return
+        if not ok:
+            await self.send(text_data=json.dumps({
+                'type': 'team_strategy_conflict',
+                'data': payload
+            }))
+            return
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                'type': 'team_strategy_group_update',
+                'payload': payload
+            }
+        )
+
+    async def team_strategy_group_update(self, event):
+        await self.send(text_data=json.dumps({
+            'type': 'team_strategy_update',
+            'data': event['payload']
         }))
 
     async def game_message(self, event):
@@ -333,3 +508,55 @@ class GameConsumer(AsyncWebsocketConsumer):
             'type': 'turn_timeout',
             'message': 'Turn time expired!'
         }))
+
+    # --- Team Switching ---
+    @database_sync_to_async
+    def _can_change_team(self, desired_team):
+        try:
+            player = Player.objects.get(user=self.user, room_id=self.room_id)
+            room = player.room
+            # Can't change once playing started
+            if room.status != GameRoom.SETTING_NUMBERS and room.status != GameRoom.WAITING:
+                return False, "Cannot change teams after game has started"
+            # Can't change if player already set secret number
+            if player.secret_number:
+                return False, "Cannot change team after setting secret number"
+            # Validate desired team
+            if desired_team not in ('A','B'):
+                return False, "Invalid team"
+            if player.team == desired_team:
+                return True, "Already on that team"
+            # Enforce balance: resulting difference should not exceed 1
+            a_count = room.players.filter(team='A').count()
+            b_count = room.players.filter(team='B').count()
+            # Simulate move
+            if player.team == 'A':
+                a_count -= 1
+            elif player.team == 'B':
+                b_count -= 1
+            if desired_team == 'A':
+                a_count += 1
+            else:
+                b_count += 1
+            if abs(a_count - b_count) > 1:
+                return False, "Team change would unbalance teams"
+            # Apply change
+            player.team = desired_team
+            player.save()
+            return True, "Team changed"
+        except Player.DoesNotExist:
+            return False, "Player not found"
+
+    async def change_team(self, desired_team):
+        ok, message = await self._can_change_team(desired_team)
+        if not ok:
+            await self.send(text_data=json.dumps({
+                'type': 'game_message',
+                'message': message
+            }))
+        else:
+            # Send success message only to requester (state broadcast covers rest)
+            await self.send(text_data=json.dumps({
+                'type': 'game_message',
+                'message': message
+            }))

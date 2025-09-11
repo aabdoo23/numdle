@@ -175,6 +175,13 @@ DATABASES = {
     }
 }
 
+# Celery / Task queue configuration (reuse Redis)
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', REDIS_URL or 'redis://127.0.0.1:6379/1')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', REDIS_URL or 'redis://127.0.0.1:6379/1')
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 60  # hard limit safeguard
+CELERY_TIMEZONE = 'UTC'
+
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators

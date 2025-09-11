@@ -1,5 +1,5 @@
 """
-Main application for Bulls and Cows strategy analysis.
+Main application for Numdle strategy analysis.
 """
 
 import argparse
@@ -10,7 +10,7 @@ from analyzer import solve_game, analyze_strategy, compare_strategies, worst_cas
 
 def interactive_game():
     """Play an interactive game against the computer."""
-    print("=== Interactive Bulls and Cows Game ===")
+    print("=== Interactive Numdle Game ===")
     print("I'll try to guess your 4-digit secret code!")
     print("Rules:")
     print("- Use 4 unique digits (0-9)")
@@ -127,7 +127,7 @@ def worst_case_test():
 
 def main():
     """Main application entry point."""
-    parser = argparse.ArgumentParser(description="Bulls and Cows Strategy Analyzer")
+    parser = argparse.ArgumentParser(description="Numdle Strategy Analyzer")
     parser.add_argument('--mode', choices=['play', 'demo', 'benchmark', 'worst-case'], 
                        default='play', help='Application mode')
     parser.add_argument('--secret', help='Secret code for demo mode')

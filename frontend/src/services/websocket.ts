@@ -108,6 +108,24 @@ export class GameWebSocket {
     });
   }
 
+  requestTeamStrategy() {
+    this.send({ type: 'get_team_strategy' });
+  }
+
+  updateTeamStrategy(payload: { version: number; notes: string; slot_digits: number[][]; draft_guess: string[] }) {
+    this.send({
+      type: 'update_team_strategy',
+      ...payload,
+    });
+  }
+
+  changeTeam(team: 'A' | 'B') {
+    this.send({
+      type: 'change_team',
+      team,
+    });
+  }
+
   private send(data: any) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(data));

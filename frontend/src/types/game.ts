@@ -50,6 +50,21 @@ export interface RoomState {
   creator_username?: string | null;
   is_private?: boolean;
   winner_username?: string | null;
+  winner_team?: 'A' | 'B' | null;
+  team_a_secret_set?: boolean;
+  team_b_secret_set?: boolean;
+  team_a_set_by_username?: string | null;
+  team_b_set_by_username?: string | null;
+}
+
+export interface TeamStrategy {
+  team: 'A' | 'B';
+  notes: string;
+  slot_digits: number[][]; // 4 x 10
+  draft_guess: string[]; // length 4
+  version: number;
+  updated_at?: string | null;
+  last_editor?: string | null;
 }
 
 export interface WebSocketMessage {

@@ -1,6 +1,6 @@
-# Bulls and Cows Game Strategy Analyzer
+# Numdle Game Strategy Analyzer
 
-A Python project for analyzing optimal strategies for the 4-digit guessing game (Bulls and Cows variant) where:
+A Python project for analyzing optimal strategies for the 4-digit guessing game (Numdle variant) where:
 - **Strikes**: Correct digits in correct positions
 - **Balls**: Correct digits in wrong positions
 

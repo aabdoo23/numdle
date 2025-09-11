@@ -1,5 +1,5 @@
 """
-Different strategies for guessing in the Bulls and Cows game.
+Different strategies for guessing in the Numdle game.
 """
 
 import random

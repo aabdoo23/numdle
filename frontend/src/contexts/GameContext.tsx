@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import type { ReactNode } from 'react';
-import type { User, RoomState } from '../types/game';
+import type { User, RoomState, TeamStrategy } from '../types/game';
 import { gameApi } from '../services/api';
 import { gameWebSocket } from '../services/websocket';
 
@@ -12,6 +12,7 @@ interface GameContextType {
   
   // Room state
   currentRoom: RoomState | null;
+  teamStrategy: TeamStrategy | null;
   isConnected: boolean;
   
   // Actions
@@ -24,11 +25,14 @@ interface GameContextType {
   setSecretNumber: (number: string) => void;
   makeGuess: (guess: string, targetPlayerId?: number) => void;
   rematch: () => Promise<boolean>;
+  updateTeamStrategy: (partial: Partial<Omit<TeamStrategy, 'team' | 'version'>> & { optimistic?: boolean }) => void;
+  changeTeam: (team: 'A' | 'B') => void;
   
   // UI state
   isLoading: boolean;
   error: string | null;
   clearError: () => void;
+  timeoutGraceEndsAt?: number | null;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -40,9 +44,11 @@ interface GameProviderProps {
 export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [currentRoom, setCurrentRoom] = useState<RoomState | null>(null);
+  const [teamStrategy, setTeamStrategy] = useState<TeamStrategy | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [timeoutGraceEndsAt, setTimeoutGraceEndsAt] = useState<number | null>(null);
 
   const clearError = useCallback(() => setError(null), []);
 
@@ -129,8 +135,39 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         try {
           await gameWebSocket.connect(cachedRoomId);
           setIsConnected(true);
-          gameWebSocket.onMessage('room_state_update', (data: RoomState) => {
-            setCurrentRoom(data);
+          const applyRoomState = (incoming: any) => {
+            // Normalize payload shape (may be {room_state: {...}} or direct RoomState)
+            const raw: any = (incoming && (incoming.room_state || incoming)) as RoomState;
+            if (!raw) return;
+            setCurrentRoom(prev => {
+              if (!prev) return raw as RoomState;
+              // Merge secret_number fields so generic broadcasts don't erase personalized data
+              if (prev.players && raw.players) {
+                const userTeam = prev.players.find(p => p.username === user?.username)?.team;
+                const mergedPlayers = raw.players.map((np: any) => {
+                  const prevMatch: any = prev.players.find(pp => pp.id === np.id);
+                  if (!np.secret_number && prevMatch?.secret_number && userTeam && prevMatch.team === userTeam) {
+                    return { ...np, secret_number: prevMatch.secret_number };
+                  }
+                  return np;
+                });
+                return { ...raw, players: mergedPlayers } as RoomState;
+              }
+              return raw as RoomState;
+            });
+          };
+          gameWebSocket.onMessage('room_state_update', applyRoomState);
+          gameWebSocket.onMessage('team_strategy_init', (data: TeamStrategy) => {
+            setTeamStrategy(data);
+          });
+          gameWebSocket.onMessage('team_strategy_update', (data: TeamStrategy) => {
+            setTeamStrategy(prev => {
+              if (!prev || data.team === prev.team) return data;
+              return prev;
+            });
+          });
+          gameWebSocket.onMessage('team_strategy_conflict', (data: TeamStrategy) => {
+            setTeamStrategy(data);
           });
           gameWebSocket.onMessage('game_message', (data: { message: string }) => {
             setError(data.message);
@@ -138,9 +175,12 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
           });
           gameWebSocket.onMessage('turn_timeout', (data: { message: string }) => {
             setError(data.message);
-            setTimeout(clearError, 3000);
+            setTimeout(clearError, 4000);
+            // Start 3s grace countdown display
+            setTimeoutGraceEndsAt(Date.now() + 3000);
           });
           gameWebSocket.requestRoomState();
+          gameWebSocket.requestTeamStrategy();
         } catch (e) {
           console.error('Auto-rejoin failed:', e);
         }
@@ -163,9 +203,31 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   localStorage.setItem('bc_current_room', roomId);
       
       // Set up WebSocket handlers
-      gameWebSocket.onMessage('room_state_update', (data: RoomState) => {
-        setCurrentRoom(data);
+      const applyRoomState = (incoming: any) => {
+        const raw: any = (incoming && (incoming.room_state || incoming)) as RoomState;
+        if (!raw) return;
+        setCurrentRoom(prev => {
+          if (!prev) return raw as RoomState;
+          const userTeam = prev.players.find(p => p.username === user?.username)?.team;
+          if (prev.players && raw.players) {
+            const mergedPlayers = raw.players.map((np: any) => {
+              const prevMatch: any = prev.players.find(pp => pp.id === np.id);
+              if (!np.secret_number && prevMatch?.secret_number && userTeam && prevMatch.team === userTeam) {
+                return { ...np, secret_number: prevMatch.secret_number };
+              }
+              return np;
+            });
+            return { ...raw, players: mergedPlayers } as RoomState;
+          }
+          return raw as RoomState;
+        });
+      };
+      gameWebSocket.onMessage('room_state_update', applyRoomState);
+      gameWebSocket.onMessage('team_strategy_init', (data: TeamStrategy) => setTeamStrategy(data));
+      gameWebSocket.onMessage('team_strategy_update', (data: TeamStrategy) => {
+        setTeamStrategy(prev => (!prev || data.team === prev.team) ? data : prev);
       });
+      gameWebSocket.onMessage('team_strategy_conflict', (data: TeamStrategy) => setTeamStrategy(data));
       
       gameWebSocket.onMessage('game_message', (data: { message: string }) => {
         setError(data.message);
@@ -174,11 +236,13 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       
       gameWebSocket.onMessage('turn_timeout', (data: { message: string }) => {
         setError(data.message);
-        setTimeout(clearError, 3000);
+        setTimeout(clearError, 4000);
+        setTimeoutGraceEndsAt(Date.now() + 3000);
       });
       
       // Request initial room state
       gameWebSocket.requestRoomState();
+  gameWebSocket.requestTeamStrategy();
       
       return true;
     } catch (err: any) {
@@ -217,6 +281,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const leaveRoom = useCallback(() => {
     gameWebSocket.disconnect();
     setCurrentRoom(null);
+  setTeamStrategy(null);
     setIsConnected(false);
   localStorage.removeItem('bc_current_room');
   }, []);
@@ -261,11 +326,49 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     }
   }, [user, currentRoom, leaveRoom, joinRoom]);
 
+  // Debounced send mechanism (simple implementation using timeout ref)
+  const strategySendRef = React.useRef<number | null>(null);
+  const pendingStrategyRef = React.useRef<TeamStrategy | null>(null);
+
+  const flushStrategy = useCallback(() => {
+    if (pendingStrategyRef.current) {
+      const s = pendingStrategyRef.current;
+      gameWebSocket.updateTeamStrategy({
+        version: s.version,
+        notes: s.notes,
+        slot_digits: s.slot_digits,
+        draft_guess: s.draft_guess,
+      });
+    }
+  }, []);
+
+  const scheduleFlush = useCallback(() => {
+    if (strategySendRef.current) window.clearTimeout(strategySendRef.current);
+    strategySendRef.current = window.setTimeout(() => {
+      flushStrategy();
+    }, 350); // 350ms debounce
+  }, [flushStrategy]);
+
+  const updateTeamStrategy = useCallback((partial: Partial<Omit<TeamStrategy, 'team' | 'version'>> & { optimistic?: boolean }) => {
+    setTeamStrategy(prev => {
+      if (!prev) return prev; // not loaded yet
+      const next: TeamStrategy = {
+        ...prev,
+        ...partial,
+        version: prev.version, // version only advances on server ack
+      };
+      pendingStrategyRef.current = next;
+      if (partial.optimistic !== false) scheduleFlush();
+      return next;
+    });
+  }, [scheduleFlush]);
+
   const value: GameContextType = {
     user,
     isAuthenticated: !!user,
   signInGuest,
     currentRoom,
+  teamStrategy,
     isConnected,
     login,
     register,
@@ -276,9 +379,12 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setSecretNumber,
     makeGuess,
     rematch,
+  updateTeamStrategy,
+  changeTeam: (team: 'A' | 'B') => { if (isConnected) gameWebSocket.changeTeam(team); },
     isLoading,
     error,
     clearError,
+  timeoutGraceEndsAt,
   };
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

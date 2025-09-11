@@ -124,6 +124,10 @@ class GameRoomView(APIView):
         is_private = bool(data.get('is_private', False))
         password = data.get('password', '') or ''
 
+        # Validate max_players is even and within reasonable bounds
+        if not isinstance(max_players, int) or max_players < 2 or max_players > 10 or max_players % 2 != 0:
+            return JsonResponse({'error': 'Max players must be an even number between 2 and 10'}, status=400)
+
         room = GameRoom.objects.create(
             name=room_name,
             max_players=max_players,
@@ -219,48 +223,41 @@ class JoinRoomView(APIView):
             return JsonResponse({'error': 'Room not found'}, status=404)
 
 
-@csrf_exempt
-def room_detail(request, room_id):
-    """Get or delete a specific room; GET requires being a player, DELETE requires being the creator"""
-    if not request.user.is_authenticated:
-        return JsonResponse({'error': 'Authentication required'}, status=401)
-    try:
-        room = GameRoom.objects.get(id=room_id)
-        if request.method == 'DELETE':
-            # Only creator can delete
-            if room.creator != request.user:
-                return JsonResponse({'error': 'Only the creator can delete this room'}, status=403)
-            room.delete()
-            return JsonResponse({'message': 'Room deleted'})
+@method_decorator(csrf_exempt, name='dispatch')
+class RoomDetailView(APIView):
+    """Get or delete a specific room; GET requires being a player; DELETE requires being the creator."""
+    permission_classes = [IsAuthenticated]
 
-        # GET below
-        # Check if user is a player in this room
+    def get_room(self, room_id):
+        return GameRoom.objects.get(id=room_id)
+
+    def get(self, request, room_id):
         try:
-            Player.objects.get(user=request.user, room=room)
-        except Player.DoesNotExist:
+            room = self.get_room(room_id)
+        except GameRoom.DoesNotExist:
+            return JsonResponse({'error': 'Room not found'}, status=404)
+
+        # Must be a player in the room
+        if not Player.objects.filter(user=request.user, room=room).exists():
             return JsonResponse({'error': 'You are not a player in this room'}, status=403)
 
-        players = []
-        for p in room.players.all():
-            players.append({
-                'id': p.id,
-                'username': p.user.username,
-                'has_secret_number': bool(p.secret_number),
-                'is_winner': p.is_winner,
-                'joined_at': p.joined_at.isoformat()
-            })
+        players = [{
+            'id': p.id,
+            'username': p.user.username,
+            'has_secret_number': bool(p.secret_number),
+            'is_winner': p.is_winner,
+            'joined_at': p.joined_at.isoformat()
+        } for p in room.players.all()]
 
-        recent_guesses = []
-        for guess in Guess.objects.filter(room=room).order_by('-timestamp')[:10]:
-            recent_guesses.append({
-                'player': guess.player.user.username,
-                'target_player': guess.target_player.user.username,
-                'guess': guess.guess_number,
-                'strikes': guess.strikes,
-                'balls': guess.balls,
-                'is_correct': guess.is_correct,
-                'timestamp': guess.timestamp.isoformat()
-            })
+        recent_guesses = [{
+            'player': g.player.user.username,
+            'target_player': g.target_player.user.username,
+            'guess': g.guess_number,
+            'strikes': g.strikes,
+            'balls': g.balls,
+            'is_correct': g.is_correct,
+            'timestamp': g.timestamp.isoformat()
+        } for g in Guess.objects.filter(room=room).order_by('-timestamp')[:10]]
 
         return JsonResponse({
             'room': {
@@ -279,8 +276,19 @@ def room_detail(request, room_id):
             'recent_guesses': recent_guesses
         })
 
-    except GameRoom.DoesNotExist:
-        return JsonResponse({'error': 'Room not found'}, status=404)
+    def delete(self, request, room_id):
+        try:
+            room = self.get_room(room_id)
+        except GameRoom.DoesNotExist:
+            return JsonResponse({'error': 'Room not found'}, status=404)
+
+        if room.creator != request.user:
+            # Provide clearer feedback if creator is None
+            if room.creator is None:
+                return JsonResponse({'error': 'Room has no creator (was created anonymously); cannot delete.'}, status=403)
+            return JsonResponse({'error': 'Only the creator can delete this room'}, status=403)
+        room.delete()
+        return JsonResponse({'message': 'Room deleted'})
 
 
 class StatsView(APIView):
@@ -348,7 +356,7 @@ class RematchView(APIView):
                 return JsonResponse({'error': 'Only players from the original game can create a rematch'}, status=403)
             
             # Create new room with same settings but new name
-            room_name = f"Rematch: {original_room.name}"
+            room_name = f"{original_room.name}"
             new_room = GameRoom.objects.create(
                 name=room_name,
                 max_players=original_room.max_players,
