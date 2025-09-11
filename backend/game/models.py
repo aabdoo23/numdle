@@ -59,12 +59,15 @@ class Player(models.Model):
     joined_at = models.DateTimeField(auto_now_add=True)
     is_winner = models.BooleanField(default=False)
     team = models.CharField(max_length=1, choices=[('A', 'Team A'), ('B', 'Team B')], blank=True)
+    # New: mutable user-facing nickname decoupled from auth_user.username (which becomes an internal key for guests)
+    display_name = models.CharField(max_length=30, blank=True, help_text="Player chosen nickname; internal user.username may be g:<uuid>")
     
     class Meta:
         unique_together = ['user', 'room']
     
     def __str__(self):
-        return f"{self.user.username} in {self.room.name}"
+        shown = self.display_name or self.user.username
+        return f"{shown} in {self.room.name}"
     
     def validate_secret_number(self, number):
         """Validate that the secret number has 4 unique digits"""

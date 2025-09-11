@@ -308,7 +308,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 effective_secret = team_secret or player.secret_number
                 players.append({
                     'id': player.id,
-                    'username': player.user.username,
+                    'username': player.display_name or player.user.username,
                     'has_secret_number': bool(team_secret),
                     'is_winner': player.is_winner,
                     'team': player.team,
@@ -318,8 +318,8 @@ class GameConsumer(AsyncWebsocketConsumer):
             guesses = []
             for guess in Guess.objects.filter(room=room).order_by('timestamp'):
                 guesses.append({
-                    'player': guess.player.user.username,
-                    'target_player': guess.target_player.user.username,
+                    'player': guess.player.display_name or guess.player.user.username,
+                    'target_player': guess.target_player.display_name or guess.target_player.user.username,
                     'guess': guess.guess_number,
                     'strikes': guess.strikes,
                     'balls': guess.balls,
@@ -338,12 +338,12 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'turn_start_time': room.turn_start_time.isoformat() if room.turn_start_time else None,
                 'turn_time_limit': room.turn_time_limit,
                 'guesses': guesses,
-                'winner_username': winner.user.username if winner else None,
+                'winner_username': (winner.display_name or winner.user.username) if winner else None,
                 'winner_team': winner.team if winner else None,
                 'team_a_secret_set': bool(room.team_a_secret),
                 'team_b_secret_set': bool(room.team_b_secret),
-                'team_a_set_by_username': room.team_a_set_by.user.username if room.team_a_set_by else None,
-                'team_b_set_by_username': room.team_b_set_by.user.username if room.team_b_set_by else None,
+                'team_a_set_by_username': (room.team_a_set_by.display_name or room.team_a_set_by.user.username) if room.team_a_set_by else None,
+                'team_b_set_by_username': (room.team_b_set_by.display_name or room.team_b_set_by.user.username) if room.team_b_set_by else None,
             }
         except GameRoom.DoesNotExist:
             return None

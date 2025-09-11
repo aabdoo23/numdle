@@ -17,12 +17,15 @@ export class GameWebSocket {
     return new Promise((resolve, reject) => {
       try {
         const token = localStorage.getItem('bc_access_token');
-        const guestUser = (() => { try { return JSON.parse(localStorage.getItem('bc_user') || 'null'); } catch { return null; } })();
+  const guestUser = (() => { try { return JSON.parse(localStorage.getItem('bc_user') || 'null'); } catch { return null; } })();
+  const deviceId = localStorage.getItem('bc_device_id');
         const base = (import.meta as any).env?.VITE_WS_BASE_URL || 'ws://localhost:8000';
         let qs = '';
         if (token) {
           qs = `?token=${encodeURIComponent(token)}`;
-        } else if (guestUser?.username) {
+        } else if (deviceId && guestUser?.username) {
+          qs = `?guest_id=${encodeURIComponent(deviceId)}&name=${encodeURIComponent(guestUser.username)}`;
+        } else if (guestUser?.username) { // legacy fallback
           qs = `?guest=${encodeURIComponent(guestUser.username)}`;
         }
         const wsUrl = `${base}/ws/game/${roomId}/` + qs;

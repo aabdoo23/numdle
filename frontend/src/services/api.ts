@@ -30,17 +30,19 @@ export const gameApi = {
     return response.data;
   },
 
-  joinRoom: async (roomId: string, password?: string, username?: string): Promise<{ message: string; room_status: string }> => {
+  joinRoom: async (roomId: string, password?: string, username?: string, deviceId?: string): Promise<{ message: string; room_status: string }> => {
     const payload: any = {};
     if (password) payload.password = password;
     if (username) payload.username = username;
+    if (deviceId) payload.device_id = deviceId;
     const response = await api.post(`/rooms/${roomId}/join/`, payload);
     return response.data;
   },
 
-  rematchRoom: async (roomId: string, username?: string): Promise<{ room_id: string; room_name: string; room_status: string }> => {
+  rematchRoom: async (roomId: string, username?: string, deviceId?: string): Promise<{ room_id: string; room_name: string; room_status: string }> => {
     const payload: any = {};
     if (username) payload.username = username;
+    if (deviceId) payload.device_id = deviceId;
     const response = await api.post(`/rooms/${roomId}/rematch/`, payload);
     return response.data;
   },

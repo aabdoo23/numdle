@@ -147,17 +147,27 @@ def join_room(request, room_id):
     except Exception:
         data = {}
     guest_name = (data.get('username') or '').strip()
+    device_id = (data.get('device_id') or '').strip()
     if not guest_name:
         return JsonResponse({'error': 'Username required'}, status=400)
-    user, _ = User.objects.get_or_create(username=guest_name)
+    # device_id required for new identity; fallback to legacy if missing
+    if device_id:
+        internal_username = f"g:{device_id}"[:150]
+    else:
+        internal_username = guest_name  # legacy fallback
+    user, _ = User.objects.get_or_create(username=internal_username)
     # Rejoin shortcut
     try:
         player = Player.objects.get(user=user, room=room)
+        # Update display name if changed
+        if guest_name and player.display_name != guest_name[:30]:
+            player.display_name = guest_name[:30]
+            player.save(update_fields=['display_name'])
         if not player.team:
             a_count = room.players.filter(team='A').count()
             b_count = room.players.filter(team='B').count()
             player.team = 'A' if a_count <= b_count else 'B'
-            player.save()
+            player.save(update_fields=['team'])
         return JsonResponse({'message': 'Rejoined room successfully', 'room_id': str(room.id), 'room_status': room.status})
     except Player.DoesNotExist:
         pass
@@ -169,7 +179,7 @@ def join_room(request, room_id):
         return JsonResponse({'error': 'Room is full'}, status=400)
     if room.status not in [GameRoom.WAITING, GameRoom.SETTING_NUMBERS]:
         return JsonResponse({'error': 'Game already in progress'}, status=400)
-    player = Player.objects.create(user=user, room=room)
+    player = Player.objects.create(user=user, room=room, display_name=guest_name[:30])
     a_count = room.players.filter(team='A').count()
     b_count = room.players.filter(team='B').count()
     player.team = 'A' if a_count <= b_count else 'B'
@@ -189,7 +199,7 @@ def room_detail(request, room_id):
     if request.method == 'GET':
         players = [{
             'id': p.id,
-            'username': p.user.username,
+            'username': (p.display_name or p.user.username),
             'has_secret_number': bool(p.secret_number),
             'is_winner': p.is_winner,
             'joined_at': p.joined_at.isoformat()
@@ -209,7 +219,10 @@ def room_detail(request, room_id):
             'status': room.status,
             'max_players': room.max_players,
             'turn_time_limit': room.turn_time_limit,
-            'current_turn_player': room.current_turn_player.username if room.current_turn_player else None,
+            'current_turn_player': None if not room.current_turn_player else (
+                (room.players.filter(user=room.current_turn_player).first().display_name or room.current_turn_player.username)
+                if room.players.filter(user=room.current_turn_player).exists() else room.current_turn_player.username
+            ),
             'turn_start_time': room.turn_start_time.isoformat() if room.turn_start_time else None,
             'created_at': room.created_at.isoformat(),
             'creator_username': room.creator.username if room.creator else None,
@@ -242,9 +255,11 @@ def rematch(request, room_id):
     except Exception:
         data = {}
     guest_name = (data.get('username') or '').strip()
+    device_id = (data.get('device_id') or '').strip()
     if not guest_name:
         return JsonResponse({'error': 'Username required'}, status=400)
-    acting_user, _ = User.objects.get_or_create(username=guest_name)
+    internal_username = f"g:{device_id}"[:150] if device_id else guest_name
+    acting_user, _ = User.objects.get_or_create(username=internal_username)
     # Ensure acting user was part of original
     if not Player.objects.filter(user=acting_user, room=original_room).exists():
         return JsonResponse({'error': 'Only players from the original game can create a rematch'}, status=403)
@@ -257,7 +272,7 @@ def rematch(request, room_id):
         password=original_room.password
     )
     for op in original_room.players.all().order_by('joined_at'):
-        Player.objects.create(user=op.user, room=new_room, team=op.team)
+        Player.objects.create(user=op.user, room=new_room, team=op.team, display_name=op.display_name or op.user.username)
     if new_room.is_full:
         new_room.status = GameRoom.SETTING_NUMBERS
         new_room.save()

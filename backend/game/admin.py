@@ -16,7 +16,7 @@ class GameRoomAdmin(admin.ModelAdmin):
 
 @admin.register(Player)
 class PlayerAdmin(admin.ModelAdmin):
-    list_display = ['user', 'room', 'has_secret_number', 'is_winner', 'joined_at']
+    list_display = ['user', 'display_name', 'room', 'has_secret_number', 'is_winner', 'joined_at']
     list_filter = ['is_winner', 'joined_at']
     search_fields = ['user__username', 'room__name']
     readonly_fields = ['joined_at']

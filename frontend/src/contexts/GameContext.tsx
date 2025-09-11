@@ -99,6 +99,11 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   // On mount: restore guest username from localStorage
   useEffect(() => {
+    // Ensure stable device id
+    if (!localStorage.getItem('bc_device_id')) {
+      const newId = crypto.randomUUID();
+      localStorage.setItem('bc_device_id', newId);
+    }
     const raw = localStorage.getItem('bc_user');
     if (raw) {
       try { setUser(JSON.parse(raw)); } catch {}
@@ -113,7 +118,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       if (cachedRoomId && !currentRoom) {
         try {
           // Ensure membership (handles rejoin case on backend)
-          await gameApi.joinRoom(cachedRoomId);
+          const deviceId = localStorage.getItem('bc_device_id') || '';
+          await gameApi.joinRoom(cachedRoomId, undefined, user.username, deviceId);
         } catch {}
         // Connect websocket and request state
         try {
@@ -179,7 +185,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setError(null);
     try {
   // For guests, include username so backend can create membership if tokenless
-  await gameApi.joinRoom(roomId, undefined, user.username);
+  const deviceId = localStorage.getItem('bc_device_id') || '';
+  await gameApi.joinRoom(roomId, undefined, user.username, deviceId);
       
       // Connect WebSocket
       await gameWebSocket.connect(roomId);
@@ -283,7 +290,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setIsLoading(true);
     setError(null);
     try {
-      const rematchData = await gameApi.rematchRoom(currentRoom.room_id, user.username);
+  const deviceId = localStorage.getItem('bc_device_id') || '';
+  const rematchData = await gameApi.rematchRoom(currentRoom.room_id, user.username, deviceId);
       leaveRoom();
       const joined = await joinRoom(rematchData.room_id);
       return joined;
