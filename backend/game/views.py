@@ -3,9 +3,10 @@ from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth.models import User
 from django.utils.decorators import method_decorator
 from django.views import View
-from .models import GameRoom, Player, Guess
+from .models import GameRoom, Player, Guess, UserMessage
 import json
 import uuid
+from django.utils import timezone
 
 
 @csrf_exempt
@@ -261,3 +262,135 @@ def rematch(request, room_id):
         new_room.status = GameRoom.SETTING_NUMBERS
         new_room.save()
     return JsonResponse({'message': 'Rematch room created successfully', 'room_id': str(new_room.id), 'room_name': new_room.name, 'room_status': new_room.status})
+
+
+# --- Message Submission System ---
+
+@csrf_exempt
+def submit_message(request):
+    """Allow users to submit messages/bug reports for admin review"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    
+    try:
+        data = json.loads(request.body or '{}')
+    except Exception:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    
+    username = (data.get('username') or '').strip()
+    subject = (data.get('subject') or '').strip()
+    message = (data.get('message') or '').strip()
+    message_type = data.get('message_type', UserMessage.OTHER)
+    
+    if not username:
+        return JsonResponse({'error': 'Username is required'}, status=400)
+    if not subject:
+        return JsonResponse({'error': 'Subject is required'}, status=400)
+    if not message:
+        return JsonResponse({'error': 'Message is required'}, status=400)
+    if message_type not in [choice[0] for choice in UserMessage.TYPE_CHOICES]:
+        message_type = UserMessage.OTHER
+    
+    # Create the message
+    user_message = UserMessage.objects.create(
+        username=username,
+        subject=subject,
+        message=message,
+        message_type=message_type
+    )
+    
+    return JsonResponse({
+        'message': 'Your message has been submitted successfully',
+        'message_id': str(user_message.id)
+    })
+
+
+def admin_list_messages(request):
+    """Admin endpoint to list all user messages"""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    if not _admin_authenticated(request):
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+    
+    # Get query parameters for filtering
+    status_filter = request.GET.get('status')
+    message_type_filter = request.GET.get('type')
+    
+    messages = UserMessage.objects.all()
+    
+    if status_filter and status_filter in [choice[0] for choice in UserMessage.STATUS_CHOICES]:
+        messages = messages.filter(status=status_filter)
+    
+    if message_type_filter and message_type_filter in [choice[0] for choice in UserMessage.TYPE_CHOICES]:
+        messages = messages.filter(message_type=message_type_filter)
+    
+    messages_data = []
+    for msg in messages[:100]:  # Limit to 100 most recent
+        messages_data.append({
+            'id': str(msg.id),
+            'username': msg.username,
+            'subject': msg.subject,
+            'message': msg.message,
+            'message_type': msg.message_type,
+            'message_type_display': msg.get_message_type_display(),
+            'status': msg.status,
+            'status_display': msg.get_status_display(),
+            'created_at': msg.created_at.isoformat(),
+            'reviewed_at': msg.reviewed_at.isoformat() if msg.reviewed_at else None,
+            'admin_notes': msg.admin_notes
+        })
+    
+    return JsonResponse({
+        'messages': messages_data,
+        'total_count': UserMessage.objects.count(),
+        'pending_count': UserMessage.objects.filter(status=UserMessage.PENDING).count(),
+        'reviewed_count': UserMessage.objects.filter(status=UserMessage.REVIEWED).count(),
+        'resolved_count': UserMessage.objects.filter(status=UserMessage.RESOLVED).count()
+    })
+
+
+@csrf_exempt
+def admin_update_message(request, message_id):
+    """Admin endpoint to update message status and add notes"""
+    if request.method not in ['PUT', 'PATCH']:
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    if not _admin_authenticated(request):
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+    
+    try:
+        message = UserMessage.objects.get(id=message_id)
+    except UserMessage.DoesNotExist:
+        return JsonResponse({'error': 'Message not found'}, status=404)
+    
+    try:
+        data = json.loads(request.body or '{}')
+    except Exception:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    
+    updated_fields = []
+    
+    # Update status
+    new_status = data.get('status')
+    if new_status and new_status in [choice[0] for choice in UserMessage.STATUS_CHOICES]:
+        old_status = message.status
+        message.status = new_status
+        updated_fields.append('status')
+        
+        # Set reviewed_at when status changes from pending
+        if old_status == UserMessage.PENDING and new_status != UserMessage.PENDING:
+            message.reviewed_at = timezone.now()
+            updated_fields.append('reviewed_at')
+    
+    # Update admin notes
+    if 'admin_notes' in data:
+        message.admin_notes = data.get('admin_notes', '')
+        updated_fields.append('admin_notes')
+    
+    if updated_fields:
+        message.save(update_fields=updated_fields)
+    
+    return JsonResponse({
+        'message': 'Message updated successfully',
+        'status': message.status,
+        'admin_notes': message.admin_notes
+    })

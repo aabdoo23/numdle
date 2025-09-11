@@ -54,6 +54,17 @@ export const gameApi = {
     await api.delete(`/rooms/${roomId}/`);
   },
 
+  // Message submission system
+  submitMessage: async (username: string, subject: string, message: string, messageType: 'bug_report' | 'feedback' | 'other' = 'other'): Promise<{ message: string; message_id: string }> => {
+    const response = await api.post('/messages/submit/', {
+      username,
+      subject,
+      message,
+      message_type: messageType,
+    });
+    return response.data;
+  },
+
   // stats endpoint removed in guest-only mode
 };
 

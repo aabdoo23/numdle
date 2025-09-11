@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Users, Clock, Play, Lock, Unlock, Trash2, Search, RefreshCw } from 'lucide-react';
+import { Plus, Users, Clock, Play, Lock, Unlock, Trash2, Search, RefreshCw, X } from 'lucide-react';
 import { useGame } from '../contexts/GameContext';
 import { gameApi } from '../services/api';
 import type { GameRoom } from '../types/game';
@@ -21,6 +21,10 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({ onHowToPlay }) => {
   const [password, setPassword] = useState('');
   const { user, joinRoom, createRoom, isLoading, error } = useGame();
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [selectedRoom, setSelectedRoom] = useState<GameRoom | null>(null);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [passwordError, setPasswordError] = useState('');
 
   useEffect(() => {
     loadRooms();
@@ -62,6 +66,16 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({ onHowToPlay }) => {
 
     const roomId = await createRoom(newRoomName, maxPlayers, turnTimeLimit, { isPrivate, password: isPrivate ? password : undefined });
     if (roomId) {
+      // If the room is private, we need to join with the password
+      if (isPrivate && password) {
+        try {
+          await gameApi.joinRoom(roomId, password, user?.username);
+          await joinRoom(roomId);
+        } catch (e) {
+          console.error('Failed to join created room:', e);
+          return; // Don't reset form if join fails
+        }
+      }
       setShowCreateForm(false);
       setNewRoomName('');
       setIsPrivate(false);
@@ -69,19 +83,43 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({ onHowToPlay }) => {
     }
   };
 
-  const handleJoinRoom = async (roomId: string, isPrivate?: boolean) => {
-    let password: string | undefined = undefined;
-    if (isPrivate) {
-      password = window.prompt('This room is private. Enter password:') || undefined;
-      if (!password) return;
+  const handleJoinRoom = async (room: GameRoom) => {
+    if (room.is_private) {
+      setSelectedRoom(room);
+      setShowPasswordModal(true);
+      setPasswordInput('');
+      setPasswordError('');
+    } else {
+      try {
+        await gameApi.joinRoom(room.id, undefined, user?.username);
+        await joinRoom(room.id);
+      } catch (e) {
+        console.error(e);
+      }
     }
-    // We can't pass password to context joinRoom signature, so use API directly then connect
+  };
+
+  const handlePasswordSubmit = async () => {
+    if (!selectedRoom || !passwordInput.trim()) return;
+
     try {
-      await gameApi.joinRoom(roomId, password, user?.username);
-      await joinRoom(roomId);
-    } catch (e) {
-      console.error(e);
+      await gameApi.joinRoom(selectedRoom.id, passwordInput, user?.username);
+      await joinRoom(selectedRoom.id);
+      setShowPasswordModal(false);
+      setSelectedRoom(null);
+      setPasswordInput('');
+      setPasswordError('');
+    } catch (e: any) {
+      console.error('Failed to join room with password:', e);
+      setPasswordError('Invalid password. Please try again.');
     }
+  };
+
+  const closePasswordModal = () => {
+    setShowPasswordModal(false);
+    setSelectedRoom(null);
+    setPasswordInput('');
+    setPasswordError('');
   };
 
   const handleDeleteRoom = async (roomId: string) => {
@@ -312,7 +350,7 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({ onHowToPlay }) => {
                   </div>
                   <div className="flex items-center space-x-2">
                     <button
-                      onClick={() => handleJoinRoom(room.id, room.is_private)}
+                      onClick={() => handleJoinRoom(room)}
                       disabled={isLoading || room.status === 'playing' || room.status === 'finished'}
                       className="bg-primary-900 hover:bg-primary-800 disabled:bg-neutral-400 text-white px-6 py-3 rounded-lg flex items-center space-x-2 transition-colors shadow-brand"
                     >
@@ -335,9 +373,62 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({ onHowToPlay }) => {
             ))
           )}
         </div>
-      </div >
 
-  {/* Stats modal removed */}
+        {/* Password Modal */}
+        {showPasswordModal && selectedRoom && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl shadow-brand p-6 w-full max-w-md mx-4 border border-neutral-200">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold text-secondary-900">Enter Room Password</h2>
+                <button
+                  onClick={closePasswordModal}
+                  className="text-neutral-400 hover:text-neutral-600 transition-colors"
+                >
+                  <Plus className="w-5 h-5 rotate-45" />
+                </button>
+              </div>
+              
+              <p className="text-secondary-600 mb-4">
+                Room "{selectedRoom.name}" is password protected. Please enter the password to join.
+              </p>
+
+              {passwordError && (
+                <div className="bg-warning-50 border border-warning-200 rounded-lg p-3 mb-4">
+                  <p className="text-warning-800 text-sm">{passwordError}</p>
+                </div>
+              )}
+
+              <div className="space-y-4">
+                <input
+                  type="password"
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handlePasswordSubmit()}
+                  className="w-full px-4 py-3 border border-neutral-300 rounded-lg focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-colors"
+                  placeholder="Enter room password"
+                  autoFocus
+                />
+                
+                <div className="flex space-x-3">
+                  <button
+                    onClick={handlePasswordSubmit}
+                    disabled={isLoading || !passwordInput.trim()}
+                    className="bg-primary-900 hover:bg-primary-800 disabled:bg-neutral-400 text-white px-6 py-3 rounded-lg flex-1 transition-colors shadow-brand"
+                  >
+                    {isLoading ? 'Joining...' : 'Join Room'}
+                  </button>
+                  <button
+                    onClick={closePasswordModal}
+                    className="bg-neutral-300 hover:bg-neutral-400 text-secondary-700 px-6 py-3 rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div >
     </div >
   );
 };

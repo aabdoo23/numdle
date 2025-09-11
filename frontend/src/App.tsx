@@ -6,6 +6,7 @@ import { GamePage } from './components/GamePage';
 import { HowToPlayPage } from './components/HowToPlayPage';
 import './App.css';
 import { AdminDashboard } from './components/AdminDashboard';
+import { Analytics } from '@vercel/analytics/react';
 
 const AppContent: React.FC = () => {
   const { isAuthenticated, currentRoom } = useGame();
@@ -44,9 +45,12 @@ const AppContent: React.FC = () => {
 
 function App() {
   return (
-    <GameProvider>
-      <AppContent />
-    </GameProvider>
+    <>
+      <Analytics />
+      <GameProvider>
+        <AppContent />
+      </GameProvider>
+    </>
   );
 }
 

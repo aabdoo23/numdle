@@ -8,6 +8,8 @@ interface GameContextType {
   user: User | null;
   isAuthenticated: boolean; // alias for !!user
   setGuestUsername: (username: string) => Promise<boolean>;
+  changeUsername: (newUsername: string) => Promise<boolean>;
+  logout: () => void;
   currentRoom: RoomState | null;
   teamStrategy: TeamStrategy | null;
   isConnected: boolean;
@@ -62,6 +64,38 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       setIsLoading(false);
     }
   }, []);
+
+  const changeUsername = useCallback(async (newUsername: string): Promise<boolean> => {
+    const clean = (newUsername || '').trim();
+    if (!clean) return false;
+    
+    // If user is in a room, they need to leave first
+    if (currentRoom) {
+      setError('Please leave the current room before changing your username');
+      return false;
+    }
+    
+    return await setGuestUsername(clean);
+  }, [currentRoom, setGuestUsername]);
+
+  const logout = useCallback(() => {
+    // Disconnect websocket and clear room state
+    if (isConnected) {
+      gameWebSocket.disconnect();
+      setIsConnected(false);
+    }
+    
+    // Clear user data
+    setUser(null);
+    localStorage.removeItem('bc_user');
+    localStorage.removeItem('bc_current_room');
+    
+    // Clear states
+    setCurrentRoom(null);
+    setTeamStrategy(null);
+    setError(null);
+    setTimeoutGraceEndsAt(null);
+  }, [isConnected]);
 
   // On mount: restore guest username from localStorage
   useEffect(() => {
@@ -302,6 +336,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     user,
     isAuthenticated: !!user,
     setGuestUsername,
+    changeUsername,
+    logout,
     currentRoom,
     teamStrategy,
     isConnected,

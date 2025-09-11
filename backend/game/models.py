@@ -161,3 +161,42 @@ class TeamStrategy(models.Model):
 
     def __str__(self):
         return f"Strategy Room={self.room_id} Team={self.team} v{self.version}"
+
+
+class UserMessage(models.Model):
+    """Messages submitted by users for admin review (bug reports, feedback, etc.)"""
+    PENDING = 'pending'
+    REVIEWED = 'reviewed'
+    RESOLVED = 'resolved'
+    
+    STATUS_CHOICES = [
+        (PENDING, 'Pending'),
+        (REVIEWED, 'Reviewed'),
+        (RESOLVED, 'Resolved'),
+    ]
+    
+    BUG_REPORT = 'bug_report'
+    FEEDBACK = 'feedback'
+    OTHER = 'other'
+    
+    TYPE_CHOICES = [
+        (BUG_REPORT, 'Bug Report'),
+        (FEEDBACK, 'Feedback'),
+        (OTHER, 'Other'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    username = models.CharField(max_length=150, help_text="Username of the message sender")
+    message_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=OTHER)
+    subject = models.CharField(max_length=200)
+    message = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    admin_notes = models.TextField(blank=True, help_text="Internal admin notes")
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"Message from {self.username}: {self.subject} ({self.status})"

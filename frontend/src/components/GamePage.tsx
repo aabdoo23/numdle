@@ -449,6 +449,7 @@ export const GamePage: React.FC<GamePageProps> = ({ onHowToPlay }) => {
                   >
                     <Target className="w-5 h-5" />
                     <span>Set Secret Number</span>
+                    <span className="text-sm opacity-75">(Enter)</span>
                   </button>
                 </div>
               </div>

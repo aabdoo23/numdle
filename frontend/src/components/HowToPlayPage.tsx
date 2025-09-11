@@ -57,33 +57,39 @@ export const HowToPlayPage: React.FC<HowToPlayPageProps> = ({ onBack }) => {
             <Users className="w-6 h-6 text-success-600" />
             <span>Game Setup</span>
           </h2>
-          <div className="grid md:grid-cols-2 gap-6">
+          <div className="space-y-8">
             <div>
               <h3 className="text-lg font-bold text-secondary-900 mb-3">1. Join or Create a Room</h3>
-              <ul className="space-y-2 text-secondary-700">
+              <ul className="space-y-2 text-secondary-700 mb-4">
                 <li>• Create a new game room or join an existing one</li>
                 <li>• Rooms can have 2-8 players</li>
                 <li>• Set turn time limits (30s - 2 minutes)</li>
                 <li>• Choose between public or private (password-protected) rooms</li>
               </ul>
-              {/* Placeholder for room creation screenshot */}
-              <div className="mt-4 bg-neutral-100 border-2 border-dashed border-neutral-300 rounded-lg p-8 text-center">
-                <p className="text-neutral-500 font-medium">📸 Room Creation Screenshot</p>
-                <p className="text-sm text-neutral-400">Screenshot of room creation interface will go here</p>
+              {/* Room creation screenshot */}
+              <div className="rounded-lg overflow-hidden border border-neutral-200 shadow-sm">
+                <img 
+                  src="/room-creation.png" 
+                  alt="Room creation interface showing options to create or join a game room"
+                  className="w-full h-auto"
+                />
               </div>
             </div>
             <div>
               <h3 className="text-lg font-bold text-secondary-900 mb-3">2. Team Formation</h3>
-              <ul className="space-y-2 text-secondary-700">
+              <ul className="space-y-2 text-secondary-700 mb-4">
                 <li>• Players are automatically assigned to teams</li>
                 <li>• Teams are balanced for fair gameplay</li>
                 <li>• Each team collaborates to set their secret number</li>
                 <li>• Teams take turns making guesses</li>
               </ul>
-              {/* Placeholder for team formation screenshot */}
-              <div className="mt-4 bg-neutral-100 border-2 border-dashed border-neutral-300 rounded-lg p-8 text-center">
-                <p className="text-neutral-500 font-medium">📸 Team Formation Screenshot</p>
-                <p className="text-sm text-neutral-400">Screenshot of team assignment will go here</p>
+              {/* Team formation screenshot */}
+              <div className="rounded-lg overflow-hidden border border-neutral-200 shadow-sm">
+                <img 
+                  src="/teams.png" 
+                  alt="Team formation interface showing player assignment to balanced teams"
+                  className="w-full h-auto"
+                />
               </div>
             </div>
           </div>
@@ -109,10 +115,13 @@ export const HowToPlayPage: React.FC<HowToPlayPageProps> = ({ onBack }) => {
               Team members can discuss and collaborate to choose the best number strategy, 
               but keep it hidden from other teams!
             </p>
-            {/* Placeholder for number setting screenshot */}
-            <div className="bg-neutral-100 border-2 border-dashed border-neutral-300 rounded-lg p-8 text-center">
-              <p className="text-neutral-500 font-medium">📸 Secret Number Setting Screenshot</p>
-              <p className="text-sm text-neutral-400">Screenshot of the number input interface will go here</p>
+            {/* Secret number setting screenshot */}
+            <div className="bg-neutral-100 border border-neutral-200 rounded-lg overflow-hidden shadow-sm">
+              <img 
+                src="/secret-number.png" 
+                alt="Secret number input interface for teams to set their 4-digit number"
+                className="w-full h-auto"
+              />
             </div>
           </div>
         </div>
@@ -136,10 +145,13 @@ export const HowToPlayPage: React.FC<HowToPlayPageProps> = ({ onBack }) => {
                   </ul>
                 </div>
                 <div>
-                  {/* Placeholder for guess interface screenshot */}
-                  <div className="bg-neutral-100 border-2 border-dashed border-neutral-300 rounded-lg p-6 text-center">
-                    <p className="text-neutral-500 font-medium">📸 Guess Interface Screenshot</p>
-                    <p className="text-sm text-neutral-400">Screenshot of making a guess will go here</p>
+                  {/* Guess interface screenshot */}
+                  <div className="bg-neutral-100 border border-neutral-200 rounded-lg overflow-hidden shadow-sm">
+                    <img 
+                      src="/make-guess.png" 
+                      alt="Guess interface showing team selection and number input"
+                      className="w-full h-auto"
+                    />
                   </div>
                 </div>
               </div>
@@ -175,10 +187,13 @@ export const HowToPlayPage: React.FC<HowToPlayPageProps> = ({ onBack }) => {
                   </p>
                 </div>
               </div>
-              {/* Placeholder for feedback screenshot */}
-              <div className="mt-4 bg-neutral-100 border-2 border-dashed border-neutral-300 rounded-lg p-8 text-center">
-                <p className="text-neutral-500 font-medium">📸 Feedback Display Screenshot</p>
-                <p className="text-sm text-neutral-400">Screenshot of guess feedback will go here</p>
+              {/* Feedback display screenshot */}
+              <div className="mt-4 bg-neutral-100 border border-neutral-200 rounded-lg overflow-hidden shadow-sm">
+                <img 
+                  src="/guess-feedback.png" 
+                  alt="Guess feedback display showing strikes and balls for previous guesses"
+                  className="w-full h-auto"
+                />
               </div>
             </div>
           </div>
@@ -214,6 +229,80 @@ export const HowToPlayPage: React.FC<HowToPlayPageProps> = ({ onBack }) => {
           </div>
         </div>
 
+        {/* Strategy Notes Section */}
+        <div className="bg-white rounded-2xl shadow-brand p-6 mb-6 border border-neutral-200">
+          <h2 className="text-2xl font-bold text-secondary-900 mb-4 flex items-center space-x-2">
+            <Eye className="w-6 h-6 text-primary-600" />
+            <span>Strategy Notes & Tracking</span>
+          </h2>
+          <div className="space-y-4">
+            <p className="text-secondary-700">
+              Numdle includes a built-in strategy notes section to help you keep track of your deductions 
+              and collaborate effectively with your team. This powerful tool is essential for organizing 
+              your thoughts and making logical progress toward solving other teams' numbers.
+            </p>
+            
+            <div className="bg-primary-50 border border-primary-200 rounded-lg p-4">
+              <h3 className="font-bold text-primary-900 mb-2">📝 Features</h3>
+              <ul className="space-y-1 text-primary-800">
+                <li>• Real-time collaborative note-taking with your teammates</li>
+                <li>• Organized tracking of guess results and patterns</li>
+                <li>• Quick reference for eliminated digits and positions</li>
+                <li>• Markdown-style formatting for clear organization</li>
+                <li>• Automatic saving so you never lose your progress</li>
+              </ul>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-6">
+              <div>
+                <h3 className="text-lg font-bold text-secondary-900 mb-3">🔍 How to Use</h3>
+                <ul className="space-y-2 text-secondary-700">
+                  <li>• Track which digits are confirmed or eliminated</li>
+                  <li>• Note position constraints from strikes and balls</li>
+                  <li>• Record patterns you've discovered</li>
+                  <li>• Plan your next guessing strategy</li>
+                  <li>• Share insights with teammates in real-time</li>
+                </ul>
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-secondary-900 mb-3">💡 Pro Tips</h3>
+                <ul className="space-y-2 text-secondary-700">
+                  <li>• Create a section for each opposing team</li>
+                  <li>• Use consistent notation (e.g., ✓ confirmed, ✗ eliminated)</li>
+                  <li>• Update notes immediately after each guess</li>
+                  <li>• Review notes before making your next guess</li>
+                  <li>• Assign note-taking roles to team members</li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Strategy notes section screenshot */}
+            <div className="bg-neutral-100 border border-neutral-200 rounded-lg overflow-hidden shadow-sm">
+              <img 
+                src="/strategy-notes-section.png" 
+                alt="Strategy notes section showing collaborative note-taking interface with real-time updates"
+                className="w-full h-auto"
+              />
+            </div>
+
+            <div className="bg-success-50 border border-success-200 rounded-lg p-4">
+              <h3 className="font-bold text-success-900 mb-2">🎯 Example Strategy Analysis</h3>
+              <div className="text-success-800 space-y-2 text-sm">
+                <p><strong>Position Analysis Tool:</strong></p>
+                <p>• <span className="bg-green-200 px-1 rounded">Green digits</span> = Confirmed in position (e.g., "3" confirmed in Slot 2)</p>
+                <p>• <span className="bg-yellow-200 px-1 rounded">Yellow digits</span> = Possible in position (e.g., "5", "6", "7", "8" possible in various slots)</p>
+                <p>• <span className="bg-red-200 px-1 rounded">Red digits</span> = Cannot be in position (e.g., "0", "1", "9" eliminated globally)</p>
+                <p>• <span className="bg-gray-200 px-1 rounded">Gray digits</span> = Unknown status</p>
+                <div className="mt-3 pt-2 border-t border-success-300">
+                  <p><strong>Draft Guess Builder:</strong> 5327 (ready to copy to guess input)</p>
+                  <p><strong>Notes Section:</strong> "Track patterns, combinations, deductions..."</p>
+                </div>
+                <p className="text-xs italic mt-2">Click digits to cycle through states • Use draft guess to test combinations</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Winning */}
         <div className="bg-white rounded-2xl shadow-brand p-6 mb-6 border border-neutral-200">
           <h2 className="text-2xl font-bold text-secondary-900 mb-4 flex items-center space-x-2">
@@ -232,10 +321,13 @@ export const HowToPlayPage: React.FC<HowToPlayPageProps> = ({ onBack }) => {
               Once a team wins, the game ends and all secret numbers are revealed. 
               You can then view detailed statistics about the game, including guess history and patterns.
             </p>
-            {/* Placeholder for victory screenshot */}
-            <div className="bg-neutral-100 border-2 border-dashed border-neutral-300 rounded-lg p-8 text-center">
-              <p className="text-neutral-500 font-medium">📸 Victory Screen Screenshot</p>
-              <p className="text-sm text-neutral-400">Screenshot of the victory celebration will go here</p>
+            {/* Victory screen screenshot */}
+            <div className="bg-neutral-100 border border-neutral-200 rounded-lg overflow-hidden shadow-sm">
+              <img 
+                src="/win-modal.png" 
+                alt="Victory screen celebration showing winning team and game statistics"
+                className="w-full h-auto"
+              />
             </div>
           </div>
         </div>
