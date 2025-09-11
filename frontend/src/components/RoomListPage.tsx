@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Users, Clock, Play, Lock, Unlock, Trash2, Search, RefreshCw, X } from 'lucide-react';
+import { Plus, Users, Clock, Play, Lock, Unlock, Trash2, Search, RefreshCw } from 'lucide-react';
 import { useGame } from '../contexts/GameContext';
 import { gameApi } from '../services/api';
 import type { GameRoom } from '../types/game';
