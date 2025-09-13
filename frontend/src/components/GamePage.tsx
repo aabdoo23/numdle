@@ -35,7 +35,8 @@ export const GamePage: React.FC<GamePageProps> = ({ onHowToPlay }) => {
     teamStrategy,
     updateTeamStrategy,
     changeTeam,
-    timeoutGraceEndsAt
+    timeoutGraceEndsAt,
+    startGame,
   } = useGame();
   const [graceRemaining, setGraceRemaining] = useState(0);
 
@@ -95,6 +96,8 @@ export const GamePage: React.FC<GamePageProps> = ({ onHowToPlay }) => {
   const canSetSecret = (currentRoom.status === 'setting_numbers' || currentRoom.status === 'waiting') && currentPlayer && !teamSecretSet;
   const gameFinished = currentRoom.status === 'finished';
   const winner = currentRoom.players.find(p => p.is_winner);
+  const amCreator = currentRoom.creator_username && currentRoom.creator_username === user?.username;
+  const canEarlyStart = amCreator && currentRoom.status === 'waiting' && ['A','B'].every(t => currentRoom.players.some(p => p.team === t));
 
   // Open win modal when game finishes
   useEffect(() => {
@@ -349,6 +352,14 @@ export const GamePage: React.FC<GamePageProps> = ({ onHowToPlay }) => {
               })}
               {(currentRoom.status === 'waiting' || currentRoom.status === 'setting_numbers') && (
                 <div className="text-[11px] text-secondary-600 italic">Players can switch teams until their team secret is set.</div>
+              )}
+              {canEarlyStart && (
+                <div className="mt-2">
+                  <button onClick={startGame} className="px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold shadow-brand">
+                    Start Game Now
+                  </button>
+                  <div className="text-[10px] text-neutral-500 mt-1">Requires at least one player per team. Full balance not required.</div>
+                </div>
               )}
             </div>
             <div className="space-y-4">

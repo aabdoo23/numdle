@@ -13,7 +13,7 @@ interface GameContextType {
   currentRoom: RoomState | null;
   teamStrategy: TeamStrategy | null;
   isConnected: boolean;
-  joinRoom: (roomId: string) => Promise<boolean>;
+  joinRoom: (roomId: string, password?: string) => Promise<boolean>;
   createRoom: (name: string, maxPlayers?: number, turnTimeLimit?: number, options?: { isPrivate?: boolean; password?: string }) => Promise<string | null>;
   leaveRoom: () => void;
   setSecretNumber: (number: string) => void;
@@ -21,6 +21,7 @@ interface GameContextType {
   rematch: () => Promise<boolean>;
   updateTeamStrategy: (partial: Partial<Omit<TeamStrategy, 'team' | 'version'>> & { optimistic?: boolean }) => void;
   changeTeam: (team: 'A' | 'B') => void;
+  startGame: () => void;
   isLoading: boolean;
   error: string | null;
   clearError: () => void;
@@ -178,7 +179,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     })();
   }, [user]);
 
-  const joinRoom = useCallback(async (roomId: string): Promise<boolean> => {
+  const joinRoom = useCallback(async (roomId: string, password?: string): Promise<boolean> => {
     if (!user) return false;
     
     setIsLoading(true);
@@ -186,7 +187,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     try {
   // For guests, include username so backend can create membership if tokenless
   const deviceId = localStorage.getItem('bc_device_id') || '';
-  await gameApi.joinRoom(roomId, undefined, user.username, deviceId);
+  await gameApi.joinRoom(roomId, password, user.username, deviceId);
       
       // Connect WebSocket
       await gameWebSocket.connect(roomId);
@@ -250,7 +251,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setError(null);
     try {
       const roomData = await gameApi.createRoom(name, maxPlayers, turnTimeLimit, options);
-      const joined = await joinRoom(roomData.room_id);
+      const joined = await joinRoom(roomData.room_id, options?.isPrivate ? options?.password : undefined);
       return joined ? roomData.room_id : null;
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to create room');
@@ -357,6 +358,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     rematch,
     updateTeamStrategy,
     changeTeam: (team: 'A' | 'B') => { if (isConnected) gameWebSocket.changeTeam(team); },
+  startGame: () => { if (isConnected) gameWebSocket.startGame(); },
     isLoading,
     error,
     clearError,

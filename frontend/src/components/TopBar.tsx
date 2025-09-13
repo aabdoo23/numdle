@@ -163,7 +163,7 @@ export const TopBar: React.FC<TopBarProps> = ({ page, onBack, onHowToPlay, title
                   <div className="flex items-center space-x-2 bg-neutral-100 px-3 py-1 rounded-full border border-neutral-200">
                     <Clock className="w-4 h-4 text-secondary-600" />
                     <span className="text-sm font-medium text-secondary-700">
-                      {currentRoom.current_turn_player === user?.username ? 'Your Turn' : `${currentRoom.current_turn_player}'s Turn`}
+                      Team {currentRoom.current_turn_team}'s Turn
                     </span>
                   </div>
                 )}

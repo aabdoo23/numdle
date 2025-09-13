@@ -66,16 +66,6 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({ onHowToPlay }) => {
 
     const roomId = await createRoom(newRoomName, maxPlayers, turnTimeLimit, { isPrivate, password: isPrivate ? password : undefined });
     if (roomId) {
-      // If the room is private, we need to join with the password
-      if (isPrivate && password) {
-        try {
-          await gameApi.joinRoom(roomId, password, user?.username);
-          await joinRoom(roomId);
-        } catch (e) {
-          console.error('Failed to join created room:', e);
-          return; // Don't reset form if join fails
-        }
-      }
       setShowCreateForm(false);
       setNewRoomName('');
       setIsPrivate(false);
@@ -91,7 +81,6 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({ onHowToPlay }) => {
       setPasswordError('');
     } else {
       try {
-        await gameApi.joinRoom(room.id, undefined, user?.username);
         await joinRoom(room.id);
       } catch (e) {
         console.error(e);
@@ -103,8 +92,7 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({ onHowToPlay }) => {
     if (!selectedRoom || !passwordInput.trim()) return;
 
     try {
-      await gameApi.joinRoom(selectedRoom.id, passwordInput, user?.username);
-      await joinRoom(selectedRoom.id);
+      await joinRoom(selectedRoom.id, passwordInput);
       setShowPasswordModal(false);
       setSelectedRoom(null);
       setPasswordInput('');

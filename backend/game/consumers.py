@@ -77,6 +77,9 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.change_team(data.get('team'))
             # After team change broadcast updated state so everyone sees new teams
             await self.send_room_state()
+        elif message_type == 'start_game':
+            await self.start_game()
+            await self.send_room_state()
 
     @database_sync_to_async
     def add_player_to_room(self):
@@ -328,12 +331,20 @@ class GameConsumer(AsyncWebsocketConsumer):
                 })
 
             winner = room.players.filter(is_winner=True).order_by('joined_at').first()
+            
+            # Get current turn player's display name
+            current_turn_display_name = None
+            if room.current_turn_player:
+                current_turn_player_obj = room.players.filter(user=room.current_turn_player).first()
+                current_turn_display_name = (current_turn_player_obj.display_name or room.current_turn_player.username) if current_turn_player_obj else room.current_turn_player.username
+            
             return {
                 'room_id': str(room.id),
                 'name': room.name,
                 'status': room.status,
+                'creator_username': room.creator.username if room.creator else None,
                 'players': players,
-                'current_turn_player': room.current_turn_player.username if room.current_turn_player else None,
+                'current_turn_player': current_turn_display_name,
                 'current_turn_team': room.current_turn_team,
                 'turn_start_time': room.turn_start_time.isoformat() if room.turn_start_time else None,
                 'turn_time_limit': room.turn_time_limit,
@@ -532,20 +543,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 return False, "Invalid team"
             if player.team == desired_team:
                 return True, "Already on that team"
-            # Enforce balance: resulting difference should not exceed 1
-            a_count = room.players.filter(team='A').count()
-            b_count = room.players.filter(team='B').count()
-            # Simulate move
-            if player.team == 'A':
-                a_count -= 1
-            elif player.team == 'B':
-                b_count -= 1
-            if desired_team == 'A':
-                a_count += 1
-            else:
-                b_count += 1
-            if abs(a_count - b_count) > 1:
-                return False, "Team change would unbalance teams"
+            # Balance restriction removed – allow any imbalance
             # Apply change
             player.team = desired_team
             player.save()
@@ -566,3 +564,49 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'type': 'game_message',
                 'message': message
             }))
+
+    # --- Start Game (early start before room full) ---
+    @database_sync_to_async
+    def _attempt_start_game(self):
+        try:
+            room = GameRoom.objects.get(id=self.room_id)
+            # Only creator can start early; if missing, assign to earliest joined player
+            if not room.creator:
+                first_player = room.players.order_by('joined_at').first()
+                if first_player and first_player.user == self.user:
+                    room.creator = self.user
+                    room.save(update_fields=['creator'])
+                else:
+                    return False, "Only the room creator can start the game"
+            elif room.creator != self.user:
+                return False, "Only the room creator can start the game"
+            if room.status not in (GameRoom.WAITING, GameRoom.SETTING_NUMBERS):
+                return False, "Game already started"
+            # Require at least one player on each team
+            has_a = room.players.filter(team='A').exists()
+            has_b = room.players.filter(team='B').exists()
+            if not (has_a and has_b):
+                return False, "Need at least one player on each team"
+            # Move to setting_numbers if still waiting
+            if room.status == GameRoom.WAITING:
+                room.status = GameRoom.SETTING_NUMBERS
+                room.save(update_fields=['status'])
+            return True, "Game started - set team secrets"
+        except GameRoom.DoesNotExist:
+            return False, "Room not found"
+
+    async def start_game(self):
+        ok, message = await self._attempt_start_game()
+        await self.send(text_data=json.dumps({
+            'type': 'game_message',
+            'message': message
+        }))
+        if ok:
+            # Broadcast new state to others
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    'type': 'game_message',
+                    'message': 'Game starting. Teams set your secrets!'
+                }
+            )

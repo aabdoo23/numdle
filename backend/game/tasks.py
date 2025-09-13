@@ -86,12 +86,15 @@ def skip_turn(room_id, original_turn_start_epoch):
     room.turn_start_time = timezone.now()
     room.save()
 
+    # Use display name for the message
+    display_name = next_player.display_name or next_player.user.username
+
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         f'game_{room_id}',
         {
             'type': 'game_message',
-            'message': f"Turn skipped. Team {room.current_turn_team}'s player {room.current_turn_player.username}'s turn now."
+            'message': f"Turn skipped. Team {room.current_turn_team}'s player {display_name}'s turn now."
         }
     )
     async_to_sync(channel_layer.group_send)(

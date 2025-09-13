@@ -129,6 +129,12 @@ export class GameWebSocket {
     });
   }
 
+  startGame() {
+    this.send({
+      type: 'start_game'
+    });
+  }
+
   private send(data: any) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(data));

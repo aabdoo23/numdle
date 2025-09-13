@@ -156,7 +156,44 @@ def join_room(request, room_id):
     else:
         internal_username = guest_name  # legacy fallback
     user, _ = User.objects.get_or_create(username=internal_username)
-    # Rejoin shortcut
+
+    # Deduplicate legacy vs device-based identities to avoid double-join
+    if device_id:
+        # A "legacy" player uses auth_user.username == guest_name; device-based uses 'g:<device_id>'
+        legacy_player = room.players.filter(display_name=guest_name[:30], user__username=guest_name).first()
+        device_player = room.players.filter(user=user).first()
+        if legacy_player and device_player:
+            # Merge into the legacy record (preserves joined_at/order), reassign to device user, then drop duplicate
+            old_user = legacy_player.user
+            # Prefer non-empty fields from device_player
+            if not legacy_player.team and device_player.team:
+                legacy_player.team = device_player.team
+            if device_player.secret_number and not legacy_player.secret_number:
+                legacy_player.secret_number = device_player.secret_number
+            legacy_player.user = user
+            if guest_name and legacy_player.display_name != guest_name[:30]:
+                legacy_player.display_name = guest_name[:30]
+            legacy_player.save()
+            # If creator pointed at old_user, update to new user
+            if room.creator_id == old_user.id:
+                room.creator = user
+                room.save(update_fields=['creator'])
+            # Remove the duplicate player
+            device_player.delete()
+            return JsonResponse({'message': 'Rejoined room successfully', 'room_id': str(room.id), 'room_status': room.status})
+        elif legacy_player and not device_player:
+            # Migrate legacy record to device-based user to keep a single identity going forward
+            old_user = legacy_player.user
+            legacy_player.user = user
+            if guest_name and legacy_player.display_name != guest_name[:30]:
+                legacy_player.display_name = guest_name[:30]
+            legacy_player.save(update_fields=['user', 'display_name'])
+            if room.creator_id == old_user.id:
+                room.creator = user
+                room.save(update_fields=['creator'])
+            return JsonResponse({'message': 'Rejoined room successfully', 'room_id': str(room.id), 'room_status': room.status})
+
+    # Rejoin shortcut for the resolved user
     try:
         player = Player.objects.get(user=user, room=room)
         # Update display name if changed
@@ -180,6 +217,10 @@ def join_room(request, room_id):
     if room.status not in [GameRoom.WAITING, GameRoom.SETTING_NUMBERS]:
         return JsonResponse({'error': 'Game already in progress'}, status=400)
     player = Player.objects.create(user=user, room=room, display_name=guest_name[:30])
+    # If no creator recorded yet, first joiner becomes creator (needed for start control)
+    if room.creator is None:
+        room.creator = user
+        room.save(update_fields=['creator'])
     a_count = room.players.filter(team='A').count()
     b_count = room.players.filter(team='B').count()
     player.team = 'A' if a_count <= b_count else 'B'
