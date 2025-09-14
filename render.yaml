@@ -11,7 +11,7 @@ services:
       python manage.py migrate --noinput
     startCommand: |
       cd backend
-      daphne -b 0.0.0.0 -p $PORT numdle_backend.asgi:application
+      daphne numdle_backend.asgi:application
     healthCheckPath: /api/health/
     autoDeploy: true
     envVars:

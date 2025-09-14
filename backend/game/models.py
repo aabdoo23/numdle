@@ -64,6 +64,11 @@ class Player(models.Model):
     
     class Meta:
         unique_together = ['user', 'room']
+        indexes = [
+            models.Index(fields=['room', 'team']),  # For team filtering
+            models.Index(fields=['room', 'is_winner']),  # For winner queries
+            models.Index(fields=['room', 'joined_at']),  # For ordering players
+        ]
     
     def __str__(self):
         shown = self.display_name or self.user.username
@@ -92,6 +97,9 @@ class Guess(models.Model):
     
     class Meta:
         ordering = ['timestamp']
+        indexes = [
+            models.Index(fields=['room', 'timestamp']),  # For room guess queries ordered by time
+        ]
     
     def __str__(self):
         return f"{self.player.user.username} guessed {self.guess_number} -> {self.strikes}S {self.balls}B"

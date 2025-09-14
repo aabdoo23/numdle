@@ -23,6 +23,7 @@ export const GamePage: React.FC<GamePageProps> = ({ onHowToPlay }) => {
   const [activeStrategyTab, setActiveStrategyTab] = useState<'team' | 'personal'>('team');
   const [isRulesExpanded, setIsRulesExpanded] = useState(false);
   const [isRematchLoading, setIsRematchLoading] = useState(false);
+  const [showLeaveConfirmation, setShowLeaveConfirmation] = useState(false);
 
   const {
     currentRoom,
@@ -136,6 +137,19 @@ export const GamePage: React.FC<GamePageProps> = ({ onHowToPlay }) => {
     } finally {
       setIsRematchLoading(false);
     }
+  };
+
+  const handleLeaveRoom = () => {
+    setShowLeaveConfirmation(true);
+  };
+
+  const confirmLeaveRoom = () => {
+    setShowLeaveConfirmation(false);
+    leaveRoom();
+  };
+
+  const cancelLeaveRoom = () => {
+    setShowLeaveConfirmation(false);
   };
 
   const handleGuessDigitChange = (index: number, value: string) => {
@@ -262,7 +276,7 @@ export const GamePage: React.FC<GamePageProps> = ({ onHowToPlay }) => {
     <div className="min-h-screen bg-neutral-50">
       <TopBar
         page="game"
-        onBack={leaveRoom}
+        onBack={handleLeaveRoom}
         onHowToPlay={onHowToPlay}
         title={`Room ${currentRoom.name}`}
         subtitle={`${currentRoom.status.replace('_', ' ').toUpperCase()} • Team ${currentRoom.current_turn_team || (isMyTurn ? currentPlayer?.team : '')}`}
@@ -1010,6 +1024,47 @@ export const GamePage: React.FC<GamePageProps> = ({ onHowToPlay }) => {
                 className="px-6 py-3 rounded-lg bg-primary-600 text-white hover:bg-primary-700 shadow-brand transition-colors"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Leave Room Confirmation Modal */}
+      {showLeaveConfirmation && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-brand-lg w-full max-w-md p-6 border border-neutral-200">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-warning-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Shield className="w-8 h-8 text-warning-600" />
+              </div>
+              <h3 className="text-xl font-bold text-secondary-900 mb-2">
+                Leave Game Room?
+              </h3>
+              <p className="text-secondary-600">
+                You're about to leave the game room. <strong>You won't be able to rejoin this room once you leave.</strong>
+              </p>
+              {currentRoom?.status === 'playing' && (
+                <div className="mt-3 p-3 bg-warning-50 border border-warning-200 rounded-lg">
+                  <p className="text-sm text-warning-800 font-medium">
+                    ⚠️ The game is currently in progress. Leaving now will remove you from the game permanently.
+                  </p>
+                </div>
+              )}
+            </div>
+            
+            <div className="flex space-x-3">
+              <button
+                onClick={cancelLeaveRoom}
+                className="flex-1 px-4 py-3 bg-neutral-200 hover:bg-neutral-300 text-secondary-700 font-medium rounded-lg transition-colors"
+              >
+                Stay in Room
+              </button>
+              <button
+                onClick={confirmLeaveRoom}
+                className="flex-1 px-4 py-3 bg-warning-600 hover:bg-warning-700 text-white font-medium rounded-lg transition-colors"
+              >
+                Leave Room
               </button>
             </div>
           </div>

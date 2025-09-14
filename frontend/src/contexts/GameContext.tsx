@@ -52,8 +52,13 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setIsLoading(true);
     setError(null);
     try {
-      // Create deterministic local id (hash) for stability across sessions on same device
-      const id = Math.abs(Array.from(clean).reduce((a, c) => ((a << 5) - a) + c.charCodeAt(0), 0)) % 1000000000;
+      // Use device ID as the actual unique identifier (matches backend logic)
+      const deviceId = localStorage.getItem('bc_device_id') || crypto.randomUUID();
+      if (!localStorage.getItem('bc_device_id')) {
+        localStorage.setItem('bc_device_id', deviceId);
+      }
+      // Create a numeric ID from device ID for consistency
+      const id = Math.abs(Array.from(deviceId).reduce((a, c) => ((a << 5) - a) + c.charCodeAt(0), 0)) % 1000000000;
       const userData: User = { id, username: clean };
       setUser(userData);
       localStorage.setItem('bc_user', JSON.stringify(userData));
@@ -70,7 +75,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     const clean = (newUsername || '').trim();
     if (!clean) return false;
     
-    // If user is in a room, they need to leave first
+    // If user is in a room, they need to leave first to avoid confusion
     if (currentRoom) {
       setError('Please leave the current room before changing your username');
       return false;
@@ -85,12 +90,13 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       gameWebSocket.disconnect();
       setIsConnected(false);
     }
-    
-    // Clear user data
+
+    // Clear user data but keep device ID for consistency
     setUser(null);
     localStorage.removeItem('bc_user');
     localStorage.removeItem('bc_current_room');
-    
+    // Note: We keep bc_device_id as it should persist across sessions
+
     // Clear states
     setCurrentRoom(null);
     setTeamStrategy(null);
@@ -107,7 +113,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     }
     const raw = localStorage.getItem('bc_user');
     if (raw) {
-      try { setUser(JSON.parse(raw)); } catch {}
+      try { setUser(JSON.parse(raw)); } catch { }
     }
   }, []);
 
@@ -121,9 +127,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
           // Ensure membership (handles rejoin case on backend)
           const deviceId = localStorage.getItem('bc_device_id') || '';
           await gameApi.joinRoom(cachedRoomId, undefined, user.username, deviceId);
-        } catch {}
-        // Connect websocket and request state
-        try {
+          
+          // Connect websocket and request state
           await gameWebSocket.connect(cachedRoomId);
           setIsConnected(true);
           const applyRoomState = (incoming: any) => {
@@ -134,6 +139,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
               if (!prev) return raw as RoomState;
               // Merge secret_number fields so generic broadcasts don't erase personalized data
               if (prev.players && raw.players) {
+                // Find user's team by matching display name (username in UI = display_name in backend)
                 const userTeam = prev.players.find(p => p.username === user?.username)?.team;
                 const mergedPlayers = raw.players.map((np: any) => {
                   const prevMatch: any = prev.players.find(pp => pp.id === np.id);
@@ -181,27 +187,28 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   const joinRoom = useCallback(async (roomId: string, password?: string): Promise<boolean> => {
     if (!user) return false;
-    
+
     setIsLoading(true);
     setError(null);
     try {
-  // For guests, include username so backend can create membership if tokenless
-  const deviceId = localStorage.getItem('bc_device_id') || '';
-  await gameApi.joinRoom(roomId, password, user.username, deviceId);
-      
+      // For guests, include username so backend can create membership if tokenless
+      const deviceId = localStorage.getItem('bc_device_id') || '';
+      await gameApi.joinRoom(roomId, password, user.username, deviceId);
+
       // Connect WebSocket
       await gameWebSocket.connect(roomId);
       setIsConnected(true);
-  localStorage.setItem('bc_current_room', roomId);
-      
+      localStorage.setItem('bc_current_room', roomId);
+
       // Set up WebSocket handlers
       const applyRoomState = (incoming: any) => {
         const raw: any = (incoming && (incoming.room_state || incoming)) as RoomState;
         if (!raw) return;
         setCurrentRoom(prev => {
           if (!prev) return raw as RoomState;
-          const userTeam = prev.players.find(p => p.username === user?.username)?.team;
           if (prev.players && raw.players) {
+            // Find user's team by matching display name (username in frontend = display_name in backend)
+            const userTeam = prev.players.find(p => p.username === user?.username)?.team;
             const mergedPlayers = raw.players.map((np: any) => {
               const prevMatch: any = prev.players.find(pp => pp.id === np.id);
               if (!np.secret_number && prevMatch?.secret_number && userTeam && prevMatch.team === userTeam) {
@@ -220,22 +227,22 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         setTeamStrategy(prev => (!prev || data.team === prev.team) ? data : prev);
       });
       gameWebSocket.onMessage('team_strategy_conflict', (data: TeamStrategy) => setTeamStrategy(data));
-      
+
       gameWebSocket.onMessage('game_message', (data: { message: string }) => {
         setError(data.message);
         setTimeout(clearError, 3000);
       });
-      
+
       gameWebSocket.onMessage('turn_timeout', (data: { message: string }) => {
         setError(data.message);
         setTimeout(clearError, 4000);
         setTimeoutGraceEndsAt(Date.now() + 3000);
       });
-      
+
       // Request initial room state
       gameWebSocket.requestRoomState();
-  gameWebSocket.requestTeamStrategy();
-      
+      gameWebSocket.requestTeamStrategy();
+
       return true;
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to join room');
@@ -270,9 +277,9 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const leaveRoom = useCallback(() => {
     gameWebSocket.disconnect();
     setCurrentRoom(null);
-  setTeamStrategy(null);
+    setTeamStrategy(null);
     setIsConnected(false);
-  localStorage.removeItem('bc_current_room');
+    localStorage.removeItem('bc_current_room');
   }, []);
 
 
@@ -291,8 +298,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setIsLoading(true);
     setError(null);
     try {
-  const deviceId = localStorage.getItem('bc_device_id') || '';
-  const rematchData = await gameApi.rematchRoom(currentRoom.room_id, user.username, deviceId);
+      const deviceId = localStorage.getItem('bc_device_id') || '';
+      const rematchData = await gameApi.rematchRoom(currentRoom.room_id, user.username, deviceId);
       leaveRoom();
       const joined = await joinRoom(rematchData.room_id);
       return joined;
@@ -358,7 +365,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     rematch,
     updateTeamStrategy,
     changeTeam: (team: 'A' | 'B') => { if (isConnected) gameWebSocket.changeTeam(team); },
-  startGame: () => { if (isConnected) gameWebSocket.startGame(); },
+    startGame: () => { if (isConnected) gameWebSocket.startGame(); },
     isLoading,
     error,
     clearError,

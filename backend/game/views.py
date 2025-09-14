@@ -106,7 +106,11 @@ def game_rooms(request):
             'max_players': r.max_players,
             'turn_time_limit': r.turn_time_limit,
             'created_at': r.created_at.isoformat(),
-            'creator_username': r.creator.username if r.creator else None,
+            'creator_username': (
+                r.players.filter(user=r.creator).first().display_name
+                if r.creator and r.players.filter(user=r.creator).exists()
+                else None
+            ),
             'is_private': r.is_private,
         } for r in rooms]
         return JsonResponse({'rooms': data})
@@ -146,59 +150,23 @@ def join_room(request, room_id):
         data = json.loads(request.body or '{}')
     except Exception:
         data = {}
-    guest_name = (data.get('username') or '').strip()
+    display_name = (data.get('username') or '').strip()
     device_id = (data.get('device_id') or '').strip()
-    if not guest_name:
+    if not display_name:
         return JsonResponse({'error': 'Username required'}, status=400)
-    # device_id required for new identity; fallback to legacy if missing
-    if device_id:
-        internal_username = f"g:{device_id}"[:150]
-    else:
-        internal_username = guest_name  # legacy fallback
+    if not device_id:
+        return JsonResponse({'error': 'Please Log out and Log back in'}, status=400)
+    
+    # Use device_id as the sole unique identifier
+    internal_username = f"g:{device_id}"[:150]
     user, _ = User.objects.get_or_create(username=internal_username)
-
-    # Deduplicate legacy vs device-based identities to avoid double-join
-    if device_id:
-        # A "legacy" player uses auth_user.username == guest_name; device-based uses 'g:<device_id>'
-        legacy_player = room.players.filter(display_name=guest_name[:30], user__username=guest_name).first()
-        device_player = room.players.filter(user=user).first()
-        if legacy_player and device_player:
-            # Merge into the legacy record (preserves joined_at/order), reassign to device user, then drop duplicate
-            old_user = legacy_player.user
-            # Prefer non-empty fields from device_player
-            if not legacy_player.team and device_player.team:
-                legacy_player.team = device_player.team
-            if device_player.secret_number and not legacy_player.secret_number:
-                legacy_player.secret_number = device_player.secret_number
-            legacy_player.user = user
-            if guest_name and legacy_player.display_name != guest_name[:30]:
-                legacy_player.display_name = guest_name[:30]
-            legacy_player.save()
-            # If creator pointed at old_user, update to new user
-            if room.creator_id == old_user.id:
-                room.creator = user
-                room.save(update_fields=['creator'])
-            # Remove the duplicate player
-            device_player.delete()
-            return JsonResponse({'message': 'Rejoined room successfully', 'room_id': str(room.id), 'room_status': room.status})
-        elif legacy_player and not device_player:
-            # Migrate legacy record to device-based user to keep a single identity going forward
-            old_user = legacy_player.user
-            legacy_player.user = user
-            if guest_name and legacy_player.display_name != guest_name[:30]:
-                legacy_player.display_name = guest_name[:30]
-            legacy_player.save(update_fields=['user', 'display_name'])
-            if room.creator_id == old_user.id:
-                room.creator = user
-                room.save(update_fields=['creator'])
-            return JsonResponse({'message': 'Rejoined room successfully', 'room_id': str(room.id), 'room_status': room.status})
 
     # Rejoin shortcut for the resolved user
     try:
         player = Player.objects.get(user=user, room=room)
         # Update display name if changed
-        if guest_name and player.display_name != guest_name[:30]:
-            player.display_name = guest_name[:30]
+        if display_name and player.display_name != display_name[:30]:
+            player.display_name = display_name[:30]
             player.save(update_fields=['display_name'])
         if not player.team:
             a_count = room.players.filter(team='A').count()
@@ -216,7 +184,7 @@ def join_room(request, room_id):
         return JsonResponse({'error': 'Room is full'}, status=400)
     if room.status not in [GameRoom.WAITING, GameRoom.SETTING_NUMBERS]:
         return JsonResponse({'error': 'Game already in progress'}, status=400)
-    player = Player.objects.create(user=user, room=room, display_name=guest_name[:30])
+    player = Player.objects.create(user=user, room=room, display_name=display_name[:30])
     # If no creator recorded yet, first joiner becomes creator (needed for start control)
     if room.creator is None:
         room.creator = user
@@ -246,8 +214,8 @@ def room_detail(request, room_id):
             'joined_at': p.joined_at.isoformat()
         } for p in room.players.all()]
         recent_guesses = [{
-            'player': g.player.user.username,
-            'target_player': g.target_player.user.username,
+            'player': g.player.display_name or g.player.user.username,
+            'target_player': g.target_player.display_name or g.target_player.user.username,
             'guess': g.guess_number,
             'strikes': g.strikes,
             'balls': g.balls,
@@ -261,12 +229,16 @@ def room_detail(request, room_id):
             'max_players': room.max_players,
             'turn_time_limit': room.turn_time_limit,
             'current_turn_player': None if not room.current_turn_player else (
-                (room.players.filter(user=room.current_turn_player).first().display_name or room.current_turn_player.username)
-                if room.players.filter(user=room.current_turn_player).exists() else room.current_turn_player.username
+                room.players.filter(user=room.current_turn_player).first().display_name
+                if room.players.filter(user=room.current_turn_player).exists() else None
             ),
             'turn_start_time': room.turn_start_time.isoformat() if room.turn_start_time else None,
             'created_at': room.created_at.isoformat(),
-            'creator_username': room.creator.username if room.creator else None,
+            'creator_username': (
+                room.players.filter(user=room.creator).first().display_name
+                if room.creator and room.players.filter(user=room.creator).exists()
+                else None
+            ),
             'is_private': room.is_private,
         }, 'players': players, 'recent_guesses': recent_guesses})
     if request.method == 'DELETE':
@@ -295,11 +267,15 @@ def rematch(request, room_id):
         data = json.loads(request.body or '{}')
     except Exception:
         data = {}
-    guest_name = (data.get('username') or '').strip()
+    display_name = (data.get('username') or '').strip()
     device_id = (data.get('device_id') or '').strip()
-    if not guest_name:
+    if not display_name:
         return JsonResponse({'error': 'Username required'}, status=400)
-    internal_username = f"g:{device_id}"[:150] if device_id else guest_name
+    if not device_id:
+        return JsonResponse({'error': 'Please Log out and Log back in'}, status=400)
+    
+    # Use device_id as the sole unique identifier
+    internal_username = f"g:{device_id}"[:150]
     acting_user, _ = User.objects.get_or_create(username=internal_username)
     # Ensure acting user was part of original
     if not Player.objects.filter(user=acting_user, room=original_room).exists():
@@ -313,7 +289,7 @@ def rematch(request, room_id):
         password=original_room.password
     )
     for op in original_room.players.all().order_by('joined_at'):
-        Player.objects.create(user=op.user, room=new_room, team=op.team, display_name=op.display_name or op.user.username)
+        Player.objects.create(user=op.user, room=new_room, team=op.team, display_name=op.display_name)
     if new_room.is_full:
         new_room.status = GameRoom.SETTING_NUMBERS
         new_room.save()

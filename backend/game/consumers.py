@@ -116,18 +116,36 @@ class GameConsumer(AsyncWebsocketConsumer):
         try:
             room = GameRoom.objects.get(id=self.room_id)
             players = list(room.players.order_by('joined_at'))
-            a_count = room.players.filter(team='A').count()
-            b_count = room.players.filter(team='B').count()
+            
+            # Count teams and collect players needing assignment in one pass
+            a_count = 0
+            b_count = 0
+            unassigned_players = []
+            
             for p in players:
-                if not p.team:
-                    # Assign to the smaller team using updated counts
+                if p.team == 'A':
+                    a_count += 1
+                elif p.team == 'B':
+                    b_count += 1
+                else:
+                    unassigned_players.append(p)
+            
+            # Bulk update unassigned players
+            if unassigned_players:
+                updates = []
+                for p in unassigned_players:
                     if a_count <= b_count:
                         p.team = 'A'
                         a_count += 1
                     else:
                         p.team = 'B'
                         b_count += 1
-                    p.save()
+                    updates.append(p)
+                
+                # Bulk update all at once
+                if updates:
+                    Player.objects.bulk_update(updates, ['team'])
+            
             return True
         except GameRoom.DoesNotExist:
             return False
@@ -266,7 +284,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'strikes': strikes,
                 'balls': balls,
                 'is_correct': is_correct,
-                'target_player': target_player.user.username
+                'target_player': target_player.display_name
             }
         except (Player.DoesNotExist, ValueError):
             return False, "Invalid guess"
@@ -281,7 +299,10 @@ class GameConsumer(AsyncWebsocketConsumer):
         This prevents leaking another player's secret via broadcasts triggered by them.
         """
         try:
-            room = GameRoom.objects.get(id=self.room_id)
+            # Use select_related to fetch related objects in one query
+            room = GameRoom.objects.select_related('creator', 'current_turn_player', 'team_a_set_by', 'team_b_set_by').get(id=self.room_id)
+            # Prefetch all players with their users in one query
+            room_players = list(room.players.select_related('user').all())
             players = []
             finished = room.status == GameRoom.FINISHED
 
@@ -289,12 +310,12 @@ class GameConsumer(AsyncWebsocketConsumer):
             current_user_team = None
             if personalized and current_user_id:
                 try:
-                    current_player_obj = room.players.get(user_id=current_user_id)
-                    current_user_team = current_player_obj.team
-                except Player.DoesNotExist:
+                    current_player_obj = next((p for p in room_players if p.user_id == current_user_id), None)
+                    current_user_team = current_player_obj.team if current_player_obj else None
+                except StopIteration:
                     current_user_team = None
 
-            for player in room.players.all():
+            for player in room_players:
                 reveal_secret = False
                 team_secret = room.team_a_secret if player.team == 'A' else room.team_b_secret if player.team == 'B' else ''
 
@@ -311,18 +332,19 @@ class GameConsumer(AsyncWebsocketConsumer):
                 effective_secret = team_secret or player.secret_number
                 players.append({
                     'id': player.id,
-                    'username': player.display_name or player.user.username,
+                    'username': player.display_name,
                     'has_secret_number': bool(team_secret),
                     'is_winner': player.is_winner,
                     'team': player.team,
                     **({'secret_number': effective_secret} if (reveal_secret or finished) else {})
                 })
 
+            # Fetch guesses with related objects in one query
             guesses = []
-            for guess in Guess.objects.filter(room=room).order_by('timestamp'):
+            for guess in Guess.objects.filter(room=room).select_related('player', 'target_player').order_by('timestamp'):
                 guesses.append({
-                    'player': guess.player.display_name or guess.player.user.username,
-                    'target_player': guess.target_player.display_name or guess.target_player.user.username,
+                    'player': guess.player.display_name,
+                    'target_player': guess.target_player.display_name,
                     'guess': guess.guess_number,
                     'strikes': guess.strikes,
                     'balls': guess.balls,
@@ -330,64 +352,96 @@ class GameConsumer(AsyncWebsocketConsumer):
                     'timestamp': guess.timestamp.isoformat()
                 })
 
-            winner = room.players.filter(is_winner=True).order_by('joined_at').first()
+            # Find winner from already-loaded players
+            winner = next((p for p in room_players if p.is_winner), None)
             
-            # Get current turn player's display name
+            # Get current turn player's display name from already-loaded data
             current_turn_display_name = None
             if room.current_turn_player:
-                current_turn_player_obj = room.players.filter(user=room.current_turn_player).first()
-                current_turn_display_name = (current_turn_player_obj.display_name or room.current_turn_player.username) if current_turn_player_obj else room.current_turn_player.username
+                current_turn_player_obj = next((p for p in room_players if p.user_id == room.current_turn_player.id), None)
+                current_turn_display_name = current_turn_player_obj.display_name if current_turn_player_obj else None
             
             return {
                 'room_id': str(room.id),
                 'name': room.name,
                 'status': room.status,
-                'creator_username': room.creator.username if room.creator else None,
+                'creator_username': (
+                    next((p.display_name for p in room_players if p.user_id == room.creator.id), None)
+                    if room.creator else None
+                ),
                 'players': players,
                 'current_turn_player': current_turn_display_name,
                 'current_turn_team': room.current_turn_team,
                 'turn_start_time': room.turn_start_time.isoformat() if room.turn_start_time else None,
                 'turn_time_limit': room.turn_time_limit,
                 'guesses': guesses,
-                'winner_username': (winner.display_name or winner.user.username) if winner else None,
+                'winner_username': winner.display_name if winner else None,
                 'winner_team': winner.team if winner else None,
                 'team_a_secret_set': bool(room.team_a_secret),
                 'team_b_secret_set': bool(room.team_b_secret),
-                'team_a_set_by_username': (room.team_a_set_by.display_name or room.team_a_set_by.user.username) if room.team_a_set_by else None,
-                'team_b_set_by_username': (room.team_b_set_by.display_name or room.team_b_set_by.user.username) if room.team_b_set_by else None,
+                'team_a_set_by_username': (
+                    next((p.display_name for p in room_players if room.team_a_set_by and p.user_id == room.team_a_set_by.id), None)
+                    if room.team_a_set_by else None
+                ),
+                'team_b_set_by_username': (
+                    next((p.display_name for p in room_players if room.team_b_set_by and p.user_id == room.team_b_set_by.id), None)
+                    if room.team_b_set_by else None
+                ),
             }
         except GameRoom.DoesNotExist:
             return None
 
     async def send_room_state(self):
-        """Broadcast a generic state + send personalized state to this socket.
-
-        Generic: no mid‑game secrets.
-        Personalized: includes only this user's secret (or all if finished).
+        """Send personalized state to this socket, then broadcast generic state to group.
+        
+        This reduces database calls by generating personalized state first, then stripping
+        secrets for the broadcast rather than making two separate database queries.
         """
         current_user_id = getattr(self.user, 'id', None)
 
-        # Generic state for everyone
-        generic_state = await self.get_room_state(None, personalized=False)
-        if generic_state:
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    'type': 'room_state_update',
-                    'room_state': generic_state
-                }
-            )
-
-        # Personalized state just for this connection (if authenticated user exists)
+        # Generate personalized state first (if authenticated user exists)
         if current_user_id:
             personal_state = await self.get_room_state(current_user_id, personalized=True)
             if personal_state:
+                # Send personalized state to this connection
                 await self.send(text_data=json.dumps({
                     'type': 'room_state_update',
                     'data': personal_state
                 }))
-            # Also push team strategy init for this user
-            await self.send_team_strategy(init=True)
+                
+                # Create generic state by stripping secret numbers (unless game finished)
+                generic_state = personal_state.copy()
+                if personal_state.get('status') != 'finished':
+                    # Remove secret numbers from players for generic broadcast
+                    generic_players = []
+                    for player in personal_state.get('players', []):
+                        generic_player = player.copy()
+                        generic_player.pop('secret_number', None)
+                        generic_players.append(generic_player)
+                    generic_state['players'] = generic_players
+                
+                # Broadcast generic state to group
+                await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {
+                        'type': 'room_state_update',
+                        'room_state': generic_state
+                    }
+                )
+                
+                # Also push team strategy init for this user
+                await self.send_team_strategy(init=True)
+        else:
+            # Fallback for unauthenticated connections
+            generic_state = await self.get_room_state(None, personalized=False)
+            if generic_state:
+                await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {
+                        'type': 'room_state_update',
+                        'room_state': generic_state
+                    }
+                )
 
     async def room_state_update(self, event):
         await self.send(text_data=json.dumps({
@@ -442,9 +496,16 @@ class GameConsumer(AsyncWebsocketConsumer):
             return False, None
 
     # Synchronous helper (must NOT be decorated) used inside other sync DB functions
-    def _serialize_team_strategy(self, ts):
+    def _serialize_team_strategy(self, ts, room=None):
         if not ts:
             return None
+        # Get room if not provided
+        if not room:
+            try:
+                room = GameRoom.objects.get(id=self.room_id)
+            except GameRoom.DoesNotExist:
+                room = None
+        
         return {
             'team': ts.team,
             'notes': ts.notes,
@@ -452,14 +513,19 @@ class GameConsumer(AsyncWebsocketConsumer):
             'draft_guess': ts.draft_guess,
             'version': ts.version,
             'updated_at': ts.updated_at.isoformat() if ts.updated_at else None,
-            'last_editor': ts.last_editor.username if ts.last_editor else None
+            'last_editor': (
+                room.players.filter(user=ts.last_editor).first().display_name
+                if ts.last_editor and room and room.players.filter(user=ts.last_editor).exists()
+                else None
+            )
         }
 
     @database_sync_to_async
     def _get_serialized_strategy_for_user(self):
         try:
-            player = Player.objects.get(user=self.user, room_id=self.room_id)
-            ts, _ = TeamStrategy.objects.get_or_create(
+            # Use select_related to avoid additional query for room
+            player = Player.objects.select_related('room').get(user=self.user, room_id=self.room_id)
+            ts, created = TeamStrategy.objects.get_or_create(
                 room_id=self.room_id,
                 team=player.team or 'A',
                 defaults={
@@ -467,8 +533,9 @@ class GameConsumer(AsyncWebsocketConsumer):
                     'draft_guess': ['', '', '', '']
                 }
             )
-            ts.ensure_defaults(save=True)
-            return self._serialize_team_strategy(ts)
+            if created or not hasattr(ts, 'slot_digits') or not hasattr(ts, 'draft_guess'):
+                ts.ensure_defaults(save=True)
+            return self._serialize_team_strategy(ts, room=player.room)
         except Player.DoesNotExist:
             return None
 
